@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use async_rdma::{LocalMrReadAccess, LocalMrWriteAccess, RdmaBuilder};
 
 
 
@@ -15,22 +14,13 @@ struct KVKey {
 }
 
 
-fn busy_poll_memory() {
-
-    
-
-
-}
-
-
 fn main() {
 
     // let mut kv_store = HashMap::<KVKey, KVEntry>::new();
-
-
-    while true {
-        busy_poll_memory();
-    }
+    
+    // register memory here
+    //
+    // then busy-poll
     
 }
 
