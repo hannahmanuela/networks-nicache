@@ -13,80 +13,24 @@ struct Args {
     port: String,
 }
 
+/// processes a single request, whose communication id is in id
+fn process_request(id: *mut rdma_cm_id, init: &mut ibv_qp_init_attr) -> i32 {
 
-fn run_server(addr: &str, port: &str) -> i32 {
+    let mut ret ;
 
     // a dummy test, this will later place the index (and the initial values?)
     let test_str = "Hello from server!".as_bytes();
     let mut send_msg: [u8; 64] = [0u8; 64];
     send_msg[0..test_str.len()].clone_from_slice(test_str);
 
-
-    // ---------------------------------------
-    //      SETUP
-    // ---------------------------------------
-    
-    // create addr info
-    let mut addr_info: *mut rdma_addrinfo = null_mut();
-    let mut hints = unsafe { std::mem::zeroed::<rdma_addrinfo>() };
-    hints.ai_flags = RAI_PASSIVE.try_into().unwrap();
-    hints.ai_port_space = rdma_port_space::RDMA_PS_TCP as i32;
-    let mut ret =
-    unsafe { rdma_getaddrinfo(addr.as_ptr().cast(), port.as_ptr().cast(), &hints, &mut addr_info) };
-    if ret != 0 {
-        println!("rdma_getaddrinfo");
-        return ret;
-    }
-
-    // initalize queues
-    // TODO: do we like these values long-term
-    let mut init = unsafe { std::mem::zeroed::<ibv_qp_init_attr>() };
-    init.cap.max_send_wr = 2;
-    init.cap.max_recv_wr = 2;
-    init.cap.max_send_sge = 2;
-    init.cap.max_recv_sge = 2;
-    init.cap.max_inline_data = 64;
-    init.sq_sig_all = 1;
-
-    // create a socket in listen_id
-    let mut listen_id = null_mut();
-    ret = unsafe { rdma_create_ep(&mut listen_id, addr_info, null_mut(), &mut init) };
-    if ret != 0 {
-        println!("rdma_create_ep");
-        unsafe { rdma_freeaddrinfo(addr_info); }
-        return ret;
-    }
-
-    // ---------------------------------------
-    //      RUN SERVER
-    // ---------------------------------------
-
-    // listen for incoming conns
-    // TODO would this be where the loop starts?
-    ret = unsafe { rdma_listen(listen_id, 0) };
-    if ret != 0 {
-        println!("rdma_listen");
-        unsafe { rdma_destroy_ep(listen_id); }
-        return ret;
-    }
-
     // ---------------------------------------
     //      HANDLE CONN -- SETUP
     // ---------------------------------------
 
-    // put received conn in id
-    let mut id: *mut rdma_cm_id = null_mut();
-    ret = unsafe { rdma_get_request(listen_id, &mut id) };
-    if ret != 0 {
-        println!("rdma_get_request");
-        unsafe { rdma_destroy_ep(listen_id); }
-        return ret;
-    }
-
     // "gets the attributes specified in attr_mask for the
     //    new conns qp and returns them through the pointers qp_attr (which we never use again) and init"
     let mut qp_attr = unsafe { std::mem::zeroed::<ibv_qp_attr>() };
-    ret = unsafe {ibv_query_qp( (*id).qp, &mut qp_attr, ibv_qp_attr_mask::IBV_QP_CAP.0.try_into().unwrap(),&mut init,)};
+    ret = unsafe {ibv_query_qp( (*id).qp, &mut qp_attr, ibv_qp_attr_mask::IBV_QP_CAP.0.try_into().unwrap(),init,)};
     if ret != 0 {
         println!("ibv_query_qp");
         unsafe { rdma_destroy_ep(id); }
@@ -220,6 +164,81 @@ fn run_server(addr: &str, port: &str) -> i32 {
     }
 
     ret
+
+}
+
+
+/// runs a central server listener, that listens on the listen_id socket
+/// and processes requests as they come in
+fn run_server_listen(listen_id: *mut rdma_cm_id, init: &mut ibv_qp_init_attr) -> i32 {
+
+    let mut ret ;
+
+    loop {
+         // listen for incoming conns
+        // TODO would this be where the loop starts?
+        ret = unsafe { rdma_listen(listen_id, 0) };
+        if ret != 0 {
+            println!("rdma_listen");
+            unsafe { rdma_destroy_ep(listen_id); }
+            return ret;
+        }
+
+        // put received conn in id
+        let mut id: *mut rdma_cm_id = null_mut();
+        ret = unsafe { rdma_get_request(listen_id, &mut id) };
+        if ret != 0 {
+            println!("rdma_get_request");
+            unsafe { rdma_destroy_ep(listen_id); }
+            return ret;
+        }
+
+        ret = process_request(id, init);
+        if ret != 0 {
+            println!("error processing request");
+            return ret;
+        }
+    }
+}
+
+
+
+/// sets up the server rdma connection, then listens for incoming connections and processes them
+fn run_server(addr: &str, port: &str) -> i32 {
+    
+    // create addr info
+    let mut addr_info: *mut rdma_addrinfo = null_mut();
+    let mut hints = unsafe { std::mem::zeroed::<rdma_addrinfo>() };
+    hints.ai_flags = RAI_PASSIVE.try_into().unwrap();
+    hints.ai_port_space = rdma_port_space::RDMA_PS_TCP as i32;
+    let mut ret =
+    unsafe { rdma_getaddrinfo(addr.as_ptr().cast(), port.as_ptr().cast(), &hints, &mut addr_info) };
+    if ret != 0 {
+        println!("rdma_getaddrinfo");
+        return ret;
+    }
+
+    // initalize queues
+    // TODO: do we like these values long-term
+    let mut init = unsafe { std::mem::zeroed::<ibv_qp_init_attr>() };
+    init.cap.max_send_wr = 2;
+    init.cap.max_recv_wr = 2;
+    init.cap.max_send_sge = 2;
+    init.cap.max_recv_sge = 2;
+    init.cap.max_inline_data = 64;
+    init.sq_sig_all = 1;
+
+    // create a socket in listen_id
+    let mut listen_id = null_mut();
+    ret = unsafe { rdma_create_ep(&mut listen_id, addr_info, null_mut(), &mut init) };
+    if ret != 0 {
+        println!("rdma_create_ep");
+        unsafe { rdma_freeaddrinfo(addr_info); }
+        return ret;
+    }
+
+    // run server
+    return run_server_listen(listen_id, &mut init);
 
 }
 
