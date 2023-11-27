@@ -1,6 +1,7 @@
 use clap::Parser;
 use rdma_sys::*;
 use std::ptr::null_mut;
+// use serde::{Serialize, Deserialize};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -13,8 +14,43 @@ struct Args {
     port: String,
 }
 
+// #[derive(Serialize, Deserialize)]
+struct KVAddr {
+    addr: u64,
+    is_cached: bool,
+    num_accesses: u8
+}
+
+fn serialize_kv_addr(struct_kv: KVAddr) -> u64 {
+
+    let mut to_ret: u64;
+
+    to_ret = struct_kv.addr;
+    if !struct_kv.is_cached {
+        to_ret = to_ret + 1;
+    }
+    let accesses: u64 = struct_kv.num_accesses as u64;
+    to_ret = to_ret + (accesses << 50);
+
+    return to_ret;
+}
+
+fn deserialize_kv_addr(addr_val: u64) -> KVAddr {
+
+    let cached_bit = addr_val & 1;
+    let num_accesses: u64 = addr_val >> 50;
+    let trunc_num_accesses: u8 = num_accesses as u8;
+
+    let addr_no_access = ((addr_val << 14) >> 14);
+    let addr_no_cached_bit = (addr_no_access >> 1) << 1;
+
+    return KVAddr { addr: addr_no_cached_bit, is_cached: cached_bit == 1, num_accesses: trunc_num_accesses };
+}
+
+
+
 /// processes a single request, whose communication id is in id
-fn process_request(id: *mut rdma_cm_id, init: &mut ibv_qp_init_attr) -> i32 {
+fn set_up_client_conn(id: *mut rdma_cm_id, init: &mut ibv_qp_init_attr) -> i32 {
 
     let mut ret ;
 
@@ -166,8 +202,7 @@ fn process_request(id: *mut rdma_cm_id, init: &mut ibv_qp_init_attr) -> i32 {
 }
 
 
-/// runs a central server listener, that listens on the listen_id socket
-/// and processes requests as they come in
+/// runs a central server listener, that listens on the listen_id socket and processes requests as they come in
 fn run_server_listen(listen_id: *mut rdma_cm_id, init: &mut ibv_qp_init_attr) -> i32 {
 
     let mut ret ;
@@ -191,14 +226,13 @@ fn run_server_listen(listen_id: *mut rdma_cm_id, init: &mut ibv_qp_init_attr) ->
             return ret;
         }
 
-        ret = process_request(id, init);
+        ret = set_up_client_conn(id, init);
         if ret != 0 {
             println!("error processing request");
             return ret;
         }
     }
 }
-
 
 
 /// sets up the server rdma connection, then listens for incoming connections and processes them
