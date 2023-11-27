@@ -132,8 +132,6 @@ fn process_request(id: *mut rdma_cm_id, init: &mut ibv_qp_init_attr) -> i32 {
     }
     if ret < 0 {
         println!("rdma_get_send_comp");
-    } else {
-        ret = 0;
     }
 
     // send the key
@@ -350,8 +348,6 @@ fn run_client(addr: &str, port: &str) -> i32 {
     }
     if ret < 0 {
         println!("rdma_get_recv_comp");
-    } else {
-        ret = 0;
     }
 
     // wait for host to send rkey - post it to recv queue
@@ -372,8 +368,6 @@ fn run_client(addr: &str, port: &str) -> i32 {
     }
     if ret < 0 {
         println!("rdma_get_recv_comp");
-    } else {
-        ret = 0;
     }
 
     // print results
