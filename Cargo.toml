@@ -9,3 +9,4 @@ edition = "2021"
 "rdma-sys" = "0.3.0"
 clap = { version = "4.4.8", features = ["derive"] }
 serde = { version = "1.0.193", features = ["derive"] }
+memmap = "0.7.0"

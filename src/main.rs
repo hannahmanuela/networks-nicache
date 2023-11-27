@@ -1,7 +1,7 @@
 use clap::Parser;
 use rdma_sys::*;
 use std::ptr::null_mut;
-// use serde::{Serialize, Deserialize};
+use memmap::MmapMut;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -14,7 +14,6 @@ struct Args {
     port: String,
 }
 
-// #[derive(Serialize, Deserialize)]
 struct KVAddr {
     addr: u64,
     is_cached: bool,
@@ -41,12 +40,56 @@ fn deserialize_kv_addr(addr_val: u64) -> KVAddr {
     let num_accesses: u64 = addr_val >> 50;
     let trunc_num_accesses: u8 = num_accesses as u8;
 
-    let addr_no_access = ((addr_val << 14) >> 14);
+    let addr_no_access = (addr_val << 14) >> 14;
     let addr_no_cached_bit = (addr_no_access >> 1) << 1;
 
     return KVAddr { addr: addr_no_cached_bit, is_cached: cached_bit == 1, num_accesses: trunc_num_accesses };
 }
 
+
+/// places a serialized kvaddr for all 8-bit keys, starting at base_pointer, that point to addr_to_put
+fn put_addr_in_for_all_keys(base_pointer: u64, addr_to_put: u64) {
+
+    for key_val in 0..256 {
+
+        let offset = key_val * 8;
+        let ass_addr = (base_pointer + offset) as *mut u64;
+        
+        let to_put = serialize_kv_addr(KVAddr{
+            addr: addr_to_put,
+            is_cached: true,
+            num_accesses: 0,});
+        
+        unsafe { *ass_addr = to_put };
+    }
+}
+
+
+fn addr_given_key(key: u8, base_pointer: u64) -> u64 {
+
+    let offset = (key * 8) as u64;
+    let ass_addr = base_pointer + offset;
+
+    return ass_addr;
+
+}
+
+
+
+/// initialize the key value store by memmaping a region of memory that can hold 256 addresses, returning the base pointer of the mapped region
+fn init_kv_store() -> u64 {
+
+    // TODO is this correct?
+    let key_size: usize = 256 * 8;
+    let res = MmapMut::map_anon(key_size);
+    match res {
+        Ok(res_val) => {
+            return res_val.as_ptr().cast::<u8>() as u64;
+        }
+        Err(_) => return 0,
+    }
+    
+} 
 
 
 /// processes a single request, whose communication id is in id
@@ -236,7 +279,7 @@ fn run_server_listen(listen_id: *mut rdma_cm_id, init: &mut ibv_qp_init_attr) ->
 
 
 /// sets up the server rdma connection, then listens for incoming connections and processes them
-fn run_server(addr: &str, port: &str) -> i32 {
+fn run_server(addr: &str, port: &str, index_base_addr: u64) -> i32 {
     
     // create addr info
     let mut addr_info: *mut rdma_addrinfo = null_mut();
@@ -275,7 +318,7 @@ fn run_server(addr: &str, port: &str) -> i32 {
 }
 
 
-fn run_client(addr: &str, port: &str) -> i32 {
+fn run_client(addr: &str, port: &str, index_base_addr: u64) -> i32 {
 
     // ---------------------------------------
     //      SETUP
@@ -449,17 +492,27 @@ fn run_client(addr: &str, port: &str) -> i32 {
 
 
 fn main() {
-    let mut args = Args::parse();
 
+    // initialize args
+    let mut args = Args::parse();
     args.addr.push_str("\0");
     args.port.push_str("\0");
     let addr = args.addr.as_str();
     let port = args.port.as_str();
 
+    // initalize KV store (for now all keys will point to the same value, which is a string that says hello from server)
+    let value = "Hello from server!".as_bytes();
+    let mut send_msg: [u8; 64] = [0u8; 64];
+    send_msg[0..value.len()].clone_from_slice(value);
+    let val_addr = send_msg.as_mut_ptr().cast::<u8>() as u64;
+
+    let index_base_addr = init_kv_store();
+    put_addr_in_for_all_keys(index_base_addr, val_addr);
+
     let ret = if args.server {
-        run_server(addr, port)
+        run_server(addr, port, index_base_addr)
     } else {
-        run_client(addr, port)
+        run_client(addr, port, index_base_addr)
     };
 
     if ret != 0 {
