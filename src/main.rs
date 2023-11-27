@@ -13,355 +13,393 @@ struct Args {
     port: String,
 }
 
-fn run(addr: &str, port: &str, server: bool) -> i32 {
-    let mut recv_msg = [0u8; 64];
+
+fn run_server(addr: &str, port: &str) -> i32 {
+
+    // a dummy test, this will later place the index (and the initial values?)
     let test_str = "Hello from server!".as_bytes();
     let mut send_msg: [u8; 64] = [0u8; 64];
-    println!("test_str len: {}", send_msg.len());
     send_msg[0..test_str.len()].clone_from_slice(test_str);
-    let mut remote_addr = [0u8; 8];
-    let mut rkey = [0u8; 4];
+
+
+    // ---------------------------------------
+    //      SETUP
+    // ---------------------------------------
+    
+    // create addr info
+    let mut addr_info: *mut rdma_addrinfo = null_mut();
     let mut hints = unsafe { std::mem::zeroed::<rdma_addrinfo>() };
-    let mut res: *mut rdma_addrinfo = null_mut();
-
-    if server {
-        hints.ai_flags = RAI_PASSIVE.try_into().unwrap();
-    }
+    hints.ai_flags = RAI_PASSIVE.try_into().unwrap();
     hints.ai_port_space = rdma_port_space::RDMA_PS_TCP as i32;
-
     let mut ret =
-        unsafe { rdma_getaddrinfo(addr.as_ptr().cast(), port.as_ptr().cast(), &hints, &mut res) };
-
+    unsafe { rdma_getaddrinfo(addr.as_ptr().cast(), port.as_ptr().cast(), &hints, &mut addr_info) };
     if ret != 0 {
         println!("rdma_getaddrinfo");
         return ret;
     }
 
-    let mut listen_id = null_mut();
-    let mut id: *mut rdma_cm_id = null_mut();
+    // initalize queues
+    // TODO: do we like these values long-term
     let mut init = unsafe { std::mem::zeroed::<ibv_qp_init_attr>() };
-
     init.cap.max_send_wr = 2;
     init.cap.max_recv_wr = 2;
     init.cap.max_send_sge = 2;
     init.cap.max_recv_sge = 2;
     init.cap.max_inline_data = 64;
     init.sq_sig_all = 1;
-    if !server {
-        init.qp_context = id.cast();
+
+    // create a socket in listen_id
+    let mut listen_id = null_mut();
+    ret = unsafe { rdma_create_ep(&mut listen_id, addr_info, null_mut(), &mut init) };
+    if ret != 0 {
+        println!("rdma_create_ep");
+        unsafe { rdma_freeaddrinfo(addr_info); }
+        return ret;
     }
 
-    if server {
-        ret = unsafe { rdma_create_ep(&mut listen_id, res, null_mut(), &mut init) };
+    // ---------------------------------------
+    //      RUN SERVER
+    // ---------------------------------------
+
+    // listen for incoming conns
+    // TODO would this be where the loop starts?
+    ret = unsafe { rdma_listen(listen_id, 0) };
+    if ret != 0 {
+        println!("rdma_listen");
+        unsafe { rdma_destroy_ep(listen_id); }
+        return ret;
+    }
+
+    // ---------------------------------------
+    //      HANDLE CONN -- SETUP
+    // ---------------------------------------
+
+    // put received conn in id
+    let mut id: *mut rdma_cm_id = null_mut();
+    ret = unsafe { rdma_get_request(listen_id, &mut id) };
+    if ret != 0 {
+        println!("rdma_get_request");
+        unsafe { rdma_destroy_ep(listen_id); }
+        return ret;
+    }
+
+    // "gets the attributes specified in attr_mask for the
+    //    new conns qp and returns them through the pointers qp_attr (which we never use again) and init"
+    let mut qp_attr = unsafe { std::mem::zeroed::<ibv_qp_attr>() };
+    ret = unsafe {ibv_query_qp( (*id).qp, &mut qp_attr, ibv_qp_attr_mask::IBV_QP_CAP.0.try_into().unwrap(),&mut init,)};
+    if ret != 0 {
+        println!("ibv_query_qp");
+        unsafe { rdma_destroy_ep(id); }
+        return ret;
+    }
+
+    // check that the queue allows for at least 64 bits inline
+    // TODO why 64? What's this sge which presumable is the default?
+    let mut send_flags = 0;
+    if init.cap.max_inline_data >= 64 {
+        send_flags = ibv_send_flags::IBV_SEND_INLINE.0;
     } else {
-        ret = unsafe { rdma_create_ep(&mut id, res, null_mut(), &mut init) };
+        println!("rdma server: device doesn't support IBV_SEND_INLINE, using sge sends");
     }
 
+    // ---------------------------------------
+    //      HANDLE CONN -- REGISTER
+    // ---------------------------------------
+
+    // register mem containing pointer to send_msg
+    let reg_mem = unsafe { rdma_reg_read(id, send_msg.as_mut_ptr().cast(), send_msg.len()) };
+    if reg_mem.is_null() {
+        ret = -1;
+        println!("rdma_reg_read for read_msg");
+        unsafe { rdma_dereg_mr(reg_mem); }
+        return ret;
+    }
+
+    // register mem containing addr of send_msg
+    let addr = send_msg.as_mut_ptr().cast::<u8>() as u64;
+    let mut addr_buf = addr.to_le_bytes();
+
+    println!("write region address: 0x{:x}", addr);
+
+    let mut addr_send_mr = null_mut();
+    if (send_flags & ibv_send_flags::IBV_SEND_INLINE.0) == 0 {
+        addr_send_mr = unsafe { rdma_reg_read(id, addr_buf.as_mut_ptr().cast(), 8) };
+        if addr_send_mr.is_null() {
+            ret = -1;
+            println!("error registering region for remote read region");
+            unsafe {
+                rdma_dereg_mr(addr_send_mr);
+            }
+            return ret;
+        }
+    }
+
+    // register mem containing addr of key
+    let rkey: u32 = unsafe { (*reg_mem).rkey };
+    let mut rkey_buf = rkey.to_le_bytes();
+
+    println!("rkey: 0x{:x}", rkey);
+
+    let mut rkey_send_mr = null_mut();
+    if (send_flags & ibv_send_flags::IBV_SEND_INLINE.0) == 0 {
+        rkey_send_mr = unsafe { rdma_reg_msgs(id, rkey_buf.as_mut_ptr().cast(), 4) };
+        if rkey_send_mr.is_null() {
+            ret = -1;
+            println!("error registering region for remote read region");
+            unsafe {
+                rdma_dereg_mr(rkey_send_mr);
+            }
+            return ret;
+        }
+    }
+
+    // ---------------------------------------
+    //      HANDLE CONN -- COMMUNICATE
+    // ---------------------------------------
+
+    // officially accept client connection
+    ret = unsafe { rdma_accept(id, null_mut()) };
+    if ret != 0 {
+        println!("rdma_accept");
+        return ret;
+    }
+
+    // send the write buffer address (this posts it to the send queue)
+    ret = unsafe {
+        rdma_post_send(
+            id,
+            null_mut(),
+            addr_buf.as_mut_ptr().cast(),
+            8,
+            addr_send_mr,
+            send_flags.try_into().unwrap(),
+        )
+    };
+    if ret != 0 {
+        println!("rdma_post_send");
+        unsafe { rdma_disconnect(id); }
+        return ret;
+    }
+
+    let mut wc = unsafe { std::mem::zeroed::<ibv_wc>() };
+    // retrieve completed work req
+    while ret == 0 {
+        ret = unsafe { rdma_get_send_comp(id, &mut wc) };
+    }
+    if ret < 0 {
+        println!("rdma_get_send_comp");
+    } else {
+        ret = 0;
+    }
+
+    // send the key
+    ret = unsafe {
+        rdma_post_send(
+            id,
+            null_mut(),
+            rkey_buf.as_mut_ptr().cast(),
+            4,
+            rkey_send_mr,
+            send_flags.try_into().unwrap(),
+        )
+    };
+    if ret != 0 {
+        println!("rdma_post_send");
+        unsafe { rdma_disconnect(id); }
+        return ret;
+    }
+
+    // retrieve completed work req
+    while ret == 0 {
+        ret = unsafe { rdma_get_send_comp(id, &mut wc) };
+    }
+    if ret < 0 {
+        println!("rdma_get_send_comp");
+    } else {
+        ret = 0;
+    }
+
+    ret
+
+}
+
+
+fn run_client(addr: &str, port: &str) -> i32 {
+
+    // ---------------------------------------
+    //      SETUP
+    // ---------------------------------------
+    
+    // create addr info
+    let mut addr_info: *mut rdma_addrinfo = null_mut();
+    let mut hints = unsafe { std::mem::zeroed::<rdma_addrinfo>() };
+    hints.ai_port_space = rdma_port_space::RDMA_PS_TCP as i32;
+    let mut ret =
+        unsafe { rdma_getaddrinfo(addr.as_ptr().cast(), port.as_ptr().cast(), &hints, &mut addr_info) };
+    if ret != 0 {
+        println!("rdma_getaddrinfo");
+        return ret;
+    }
+
+    // initalize queues
+    // TODO: do we like these values long-term
+    let mut id: *mut rdma_cm_id = null_mut();
+    let mut init = unsafe { std::mem::zeroed::<ibv_qp_init_attr>() };
+    init.cap.max_send_wr = 2;
+    init.cap.max_recv_wr = 2;
+    init.cap.max_send_sge = 2;
+    init.cap.max_recv_sge = 2;
+    init.cap.max_inline_data = 64;
+    init.sq_sig_all = 1;
+    init.qp_context = id.cast();
+
+    // create a socket in id
+    ret = unsafe { rdma_create_ep(&mut id, addr_info, null_mut(), &mut init) };
     if ret != 0 {
         println!("rdma_create_ep");
         unsafe {
-            rdma_freeaddrinfo(res);
+            rdma_freeaddrinfo(addr_info);
         }
         return ret;
     }
 
-    if server {
-        ret = unsafe { rdma_listen(listen_id, 0) };
-        if ret != 0 {
-            println!("rdma_listen");
-            unsafe {
-                rdma_destroy_ep(listen_id);
-            }
-            return ret;
+    // ---------------------------------------
+    //      GET VALUE - REGISTER
+    // ---------------------------------------
+
+    // register memory region to hold addr of value
+    let mut remote_addr = [0u8; 8];
+    let addr_mr = unsafe { rdma_reg_msgs(id, remote_addr.as_mut_ptr().cast(), 8) };
+    if addr_mr.is_null() {
+        println!("rdma_reg_write for remote addr");
+        unsafe {
+            rdma_destroy_ep(id);
         }
-
-        ret = unsafe { rdma_get_request(listen_id, &mut id) };
-        if ret != 0 {
-            println!("rdma_get_request");
-            unsafe {
-                rdma_destroy_ep(listen_id);
-            }
-            return ret;
-        }
-
-        let mut qp_attr = unsafe { std::mem::zeroed::<ibv_qp_attr>() };
-        ret = unsafe {
-            ibv_query_qp(
-                (*id).qp,
-                &mut qp_attr,
-                ibv_qp_attr_mask::IBV_QP_CAP.0.try_into().unwrap(),
-                &mut init,
-            )
-        };
-
-        if ret != 0 {
-            println!("ibv_query_qp");
-            unsafe {
-                rdma_destroy_ep(id);
-            }
-            return ret;
-        }
-
-        let mut send_flags = 0;
-        if init.cap.max_inline_data >= 64 {
-            send_flags = ibv_send_flags::IBV_SEND_INLINE.0;
-        } else {
-            println!("rdma server: device doesn't support IBV_SEND_INLINE, using sge sends");
-        }
-
-        // using rdma READ, register buffer for remote client to read from
-        let read_mr = unsafe { rdma_reg_read(id, send_msg.as_mut_ptr().cast(), send_msg.len()) };
-        if read_mr.is_null() {
-            ret = -1;
-            println!("rdma_reg_read for read_msg");
-            unsafe {
-                rdma_dereg_mr(read_mr);
-            }
-            return ret;
-        }
-
-        let addr = send_msg.as_mut_ptr().cast::<u8>() as u64;
-        let mut addr_buf = addr.to_le_bytes();
-
-        println!("write region address: 0x{:x}", addr);
-
-        // register addr_buf as a send memory region
-        let mut addr_send_mr = null_mut();
-        if (send_flags & ibv_send_flags::IBV_SEND_INLINE.0) == 0 {
-            addr_send_mr = unsafe { rdma_reg_read(id, addr_buf.as_mut_ptr().cast(), 8) };
-            if addr_send_mr.is_null() {
-                ret = -1;
-                println!("error registering region for remote read region");
-                unsafe {
-                    rdma_dereg_mr(addr_send_mr);
-                }
-                return ret;
-            }
-        }
-
-        let rkey: u32 = unsafe { (*read_mr).rkey };
-        let mut rkey_buf = rkey.to_le_bytes();
-
-        println!("rkey: 0x{:x}", rkey);
-
-        let mut rkey_send_mr = null_mut();
-        if (send_flags & ibv_send_flags::IBV_SEND_INLINE.0) == 0 {
-            rkey_send_mr = unsafe { rdma_reg_msgs(id, rkey_buf.as_mut_ptr().cast(), 4) };
-            if rkey_send_mr.is_null() {
-                ret = -1;
-                println!("error registering region for remote read region");
-                unsafe {
-                    rdma_dereg_mr(rkey_send_mr);
-                }
-                return ret;
-            }
-        }
-
-        // accept client connection
-        ret = unsafe { rdma_accept(id, null_mut()) };
-        if ret != 0 {
-            println!("rdma_accept");
-            return ret;
-        }
-
-        //send the write buffer address
-        ret = unsafe {
-            rdma_post_send(
-                id,
-                null_mut(),
-                addr_buf.as_mut_ptr().cast(),
-                8,
-                addr_send_mr,
-                send_flags.try_into().unwrap(),
-            )
-        };
-
-        if ret != 0 {
-            println!("rdma_post_send");
-            unsafe {
-                rdma_disconnect(id);
-            }
-            return ret;
-        }
-
-        let mut wc = unsafe { std::mem::zeroed::<ibv_wc>() };
-        while ret == 0 {
-            ret = unsafe { rdma_get_send_comp(id, &mut wc) };
-        }
-        if ret < 0 {
-            println!("rdma_get_send_comp");
-        } else {
-            ret = 0;
-        }
-
-        //send the write buffer address
-        ret = unsafe {
-            rdma_post_send(
-                id,
-                null_mut(),
-                rkey_buf.as_mut_ptr().cast(),
-                4,
-                rkey_send_mr,
-                send_flags.try_into().unwrap(),
-            )
-        };
-
-        if ret != 0 {
-            println!("rdma_post_send");
-            unsafe {
-                rdma_disconnect(id);
-            }
-            return ret;
-        }
-
-        while ret == 0 {
-            ret = unsafe { rdma_get_send_comp(id, &mut wc) };
-        }
-        if ret < 0 {
-            println!("rdma_get_send_comp");
-        } else {
-            ret = 0;
-        }
-
-        while ret == 0 {
-            ret = unsafe { rdma_get_send_comp(id, &mut wc) };
-        }
-        if ret < 0 {
-            println!("rdma_get_send_comp");
-        } else {
-            ret = 0;
-        }
-
-        ret
-    } else {
-        //register remote addr memory region
-        let addr_mr = unsafe { rdma_reg_msgs(id, remote_addr.as_mut_ptr().cast(), 8) };
-        if addr_mr.is_null() {
-            println!("rdma_reg_write for remote addr");
-            unsafe {
-                rdma_destroy_ep(id);
-            }
-            return -1;
-        }
-
-        // register rkey region
-        let rkey_mr = unsafe { rdma_reg_msgs(id, rkey.as_mut_ptr().cast(), 4) };
-        if rkey_mr.is_null() {
-            println!("rdma_reg_write for remote key");
-            unsafe {
-                rdma_destroy_ep(id);
-            }
-            return -1;
-        }
-
-        // register recv region
-        let recv_mr = unsafe { rdma_reg_read(id, recv_msg.as_mut_ptr().cast(), recv_msg.len()) };
-        if recv_mr.is_null() {
-            println!("rdma_reg_write for remote key");
-            unsafe {
-                rdma_destroy_ep(id);
-            }
-            return -1;
-        }
-
-        ret = unsafe { rdma_connect(id, null_mut()) };
-
-        if ret != 0 {
-            println!("rdma_connect");
-            unsafe { rdma_disconnect(id) };
-        }
-
-        // post recv for remote addr
-        ret =
-            unsafe { rdma_post_recv(id, null_mut(), remote_addr.as_mut_ptr().cast(), 8, addr_mr) };
-        if ret != 0 {
-            println!("error getting remote address");
-            unsafe {
-                rdma_dereg_mr(addr_mr);
-            }
-            return -1;
-        }
-
-        ret = 0;
-        let mut wc = unsafe { std::mem::zeroed::<ibv_wc>() };
-        while ret == 0 {
-            ret = unsafe { rdma_get_recv_comp(id, &mut wc) };
-        }
-        if ret < 0 {
-            println!("rdma_get_recv_comp");
-        } else {
-            ret = 0;
-        }
-
-        // post recv for rkey
-        ret = unsafe { rdma_post_recv(id, null_mut(), rkey.as_mut_ptr().cast(), 4, rkey_mr) };
-        if ret != 0 {
-            println!("error getting remote address");
-            unsafe {
-                rdma_dereg_mr(rkey_mr);
-            }
-            return -1;
-        }
-
-        ret = 0;
-        wc = unsafe { std::mem::zeroed::<ibv_wc>() };
-        while ret == 0 {
-            ret = unsafe { rdma_get_recv_comp(id, &mut wc) };
-        }
-        if ret < 0 {
-            println!("rdma_get_recv_comp");
-        } else {
-            ret = 0;
-        }
-
-        // print results
-        let remote_addr = u64::from_le_bytes(remote_addr);
-        let rkey = u32::from_le_bytes(rkey);
-
-        println!("remote addr: 0x{:x}", remote_addr);
-        println!("rkey: 0x{:x}", rkey);
-
-        ret = unsafe {
-            rdma_post_read(
-                id,
-                null_mut(),
-                recv_msg.as_mut_ptr().cast(),
-                recv_msg.len(),
-                recv_mr,
-                0,
-                remote_addr,
-                rkey,
-            )
-        };
-
-        if ret != 0 {
-            println!("rdma_post_read");
-            unsafe {
-                rdma_disconnect(id);
-            }
-            return ret;
-        }
-
-        while ret == 0 {
-            ret = unsafe { rdma_get_send_comp(id, &mut wc) };
-        }
-        if ret < 0 {
-            println!("rdma_get_recv_comp");
-        } else {
-            ret = 0;
-        }
-
-        let s = match std::str::from_utf8(&recv_msg) {
-            Ok(v) => v,
-            Err(e) => panic!("invalid string: {}", e),
-        };
-
-        println!("data read: {:?}", recv_msg);
-        println!("string read: {}", s);
-
-        ret
+        return -1;
     }
+
+    // register memory region to hold key
+    let mut rkey = [0u8; 4];
+    let rkey_mr = unsafe { rdma_reg_msgs(id, rkey.as_mut_ptr().cast(), 4) };
+    if rkey_mr.is_null() {
+        println!("rdma_reg_write for remote key");
+        unsafe {
+            rdma_destroy_ep(id);
+        }
+        return -1;
+    }
+
+    // register memory region to hold value
+    // TODO when it's not just a test message we won't actually know how big the value is, there will have to be a max size
+    let mut recv_msg = [0u8; 64];
+    let recv_mr = unsafe { rdma_reg_read(id, recv_msg.as_mut_ptr().cast(), recv_msg.len()) };
+    if recv_mr.is_null() {
+        println!("rdma_reg_write for remote key");
+        unsafe {
+            rdma_destroy_ep(id);
+        }
+        return -1;
+    }
+
+    // ---------------------------------------
+    //      GET VALUE - RUN GETS
+    // ---------------------------------------
+
+    // connect using socket in id
+    ret = unsafe { rdma_connect(id, null_mut()) };
+    if ret != 0 {
+        println!("rdma_connect");
+        unsafe { rdma_disconnect(id) };
+    }
+
+    // wait for host to send remote addr - post it to recv queue
+    ret =
+        unsafe { rdma_post_recv(id, null_mut(), remote_addr.as_mut_ptr().cast(), 8, addr_mr) };
+    if ret != 0 {
+        println!("error getting remote address");
+        unsafe {
+            rdma_dereg_mr(addr_mr);
+        }
+        return -1;
+    }
+    
+    // retrieve completed work req
+    ret = 0;
+    let mut wc = unsafe { std::mem::zeroed::<ibv_wc>() };
+    while ret == 0 {
+        ret = unsafe { rdma_get_recv_comp(id, &mut wc) };
+    }
+    if ret < 0 {
+        println!("rdma_get_recv_comp");
+    } else {
+        ret = 0;
+    }
+
+    // wait for host to send rkey - post it to recv queue
+    ret = unsafe { rdma_post_recv(id, null_mut(), rkey.as_mut_ptr().cast(), 4, rkey_mr) };
+    if ret != 0 {
+        println!("error getting remote address");
+        unsafe {
+            rdma_dereg_mr(rkey_mr);
+        }
+        return -1;
+    }
+
+    // retrieve completed work req
+    ret = 0;
+    wc = unsafe { std::mem::zeroed::<ibv_wc>() };
+    while ret == 0 {
+        ret = unsafe { rdma_get_recv_comp(id, &mut wc) };
+    }
+    if ret < 0 {
+        println!("rdma_get_recv_comp");
+    } else {
+        ret = 0;
+    }
+
+    // print results
+    let remote_addr = u64::from_le_bytes(remote_addr);
+    let rkey = u32::from_le_bytes(rkey);
+
+    println!("remote addr: 0x{:x}", remote_addr);
+    println!("rkey: 0x{:x}", rkey);
+
+    // post read to id's queue for value, pass retrieved key and remote addr
+    ret = unsafe {
+        rdma_post_read( id, null_mut(), recv_msg.as_mut_ptr().cast(), 
+            recv_msg.len(), recv_mr, 0, remote_addr, rkey,)
+    };
+    if ret != 0 {
+        println!("rdma_post_read");
+        unsafe { rdma_disconnect(id); }
+        return ret;
+    }
+
+    // retrieve completed work req
+    while ret == 0 {
+        ret = unsafe { rdma_get_send_comp(id, &mut wc) };
+    }
+    if ret < 0 {
+        println!("rdma_get_recv_comp");
+    } else {
+        ret = 0;
+    }
+
+    // check that the received value is as expected, print it
+    let s = match std::str::from_utf8(&recv_msg) {
+        Ok(v) => v,
+        Err(e) => panic!("invalid string: {}", e),
+    };
+
+    println!("data read: {:?}", recv_msg);
+    println!("string read: {}", s);
+
+    ret
+
+
 }
+
+
 
 fn main() {
     let mut args = Args::parse();
@@ -371,7 +409,12 @@ fn main() {
     let addr = args.addr.as_str();
     let port = args.port.as_str();
 
-    let ret = run(addr, port, args.server);
+    let ret = if args.server {
+        run_server(addr, port)
+    } else {
+        run_client(addr, port)
+    };
+
     if ret != 0 {
         println!(
             "rdma_client: ret error {:?}",
