@@ -172,16 +172,16 @@ fn run_server_listen(listen_id: *mut rdma_cm_id, init: &mut ibv_qp_init_attr) ->
 
     let mut ret ;
 
-    loop {
-         // listen for incoming conns
-        // TODO would this be where the loop starts?
-        ret = unsafe { rdma_listen(listen_id, 0) };
-        if ret != 0 {
-            println!("rdma_listen");
-            unsafe { rdma_destroy_ep(listen_id); }
-            return ret;
-        }
+    // listen for incoming conns
+    // TODO would this be where the loop starts?
+    ret = unsafe { rdma_listen(listen_id, 0) };
+    if ret != 0 {
+        println!("rdma_listen");
+        unsafe { rdma_destroy_ep(listen_id); }
+        return ret;
+    }
 
+    loop {
         // put received conn in id
         let mut id: *mut rdma_cm_id = null_mut();
         ret = unsafe { rdma_get_request(listen_id, &mut id) };
