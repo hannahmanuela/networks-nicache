@@ -1,7 +1,7 @@
 use clap::Parser;
 use rdma_sys::*;
 use std::ptr::null_mut;
-use memmap::MmapMut;
+use libc;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -81,14 +81,20 @@ fn init_kv_store() -> u64 {
 
     // TODO is this correct?
     let key_size: usize = 256 * 8;
-    let res = MmapMut::map_anon(key_size);
-    match res {
-        Ok(res_val) => {
-            return res_val.as_ptr().cast::<u8>() as u64;
-        }
-        Err(_) => return 0,
+    let res = unsafe { libc::mmap(
+	null_mut(),
+	key_size, 
+	libc::PROT_READ | libc::PROT_WRITE,
+	libc::MAP_ANONYMOUS | libc::MAP_PRIVATE,
+	0,
+	0,
+    ) };
+
+    if res == libc::MAP_FAILED {
+	panic!("mapping KVS memory failed");
     }
-    
+
+    res as u64
 } 
 
 
