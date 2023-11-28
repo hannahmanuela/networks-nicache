@@ -266,6 +266,11 @@ fn set_up_client_conn(id: *mut rdma_cm_id, init: &mut ibv_qp_init_attr, index_ba
     let mut values_rkey_buf = values_rkey.to_le_bytes();
     let values_rkey_mem = reg_read(id, values_rkey_buf.as_ptr() as u64, values_rkey_buf.len()).unwrap();
 
+
+    println!("sending index base: 0x{:x}", index_base_addr);
+    println!("sending index rkey: 0x{:x}", index_rkey);
+    println!("sending values rkey: 0x{:x}", values_rkey);
+    
     // ---------------------------------------
     //      HANDLE CONN -- COMMUNICATE
     // ---------------------------------------
@@ -422,9 +427,12 @@ fn run_client(addr: &str, port: &str, index_base_addr: u64) -> i32 {
 
     // wait for host to send remote addr - post it to recv queue
     post_recv_and_wait(id, &mut index_base_buf, index_base_mr).unwrap();
+    post_recv_and_wait(id, &mut index_rkey_buf, index_rkey_mr).unwrap();
+    post_recv_and_wait(id, &mut values_rkey_buf, values_rkey_mr).unwrap();
     
     println!("index base: 0x{:x}", u64::from_le_bytes(index_base_buf));
-
+    println!("index rkey: 0x{:x}", u64::from_le_bytes(index_rkey_buf));
+    println!("values rkey: 0x{:x}", u64::from_le_bytes(values_rkey_buf));
     0
 }
 
@@ -449,8 +457,6 @@ fn main() {
     put_addr_in_for_all_keys(&kv, val_addr);
     
     let ret = if args.server {
-
-	println!("index base: 0x{:x}", kv.index);
         run_server(addr, port, kv.index)
     } else {
         run_client(addr, port, kv.index)
