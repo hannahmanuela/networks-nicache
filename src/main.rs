@@ -16,7 +16,9 @@ struct Args {
 }
 
 struct KVS {
-    index: u64
+    index_base: u64,
+    index_rkey: u32,
+    values_rkey: u32,
 }
 
 struct KVAddr {
@@ -64,12 +66,12 @@ fn deserialize_kv_addr(addr_val: u64) -> KVAddr {
 
 
 /// places a serialized kvaddr for all 8-bit keys, starting at base_pointer, that point to addr_to_put
-fn put_addr_in_for_all_keys(kv: &KVS, addr_to_put: u64) {
+fn put_addr_in_for_all_keys(kvs: &KVS, addr_to_put: u64) {
 
     for key_val in 0..256 {
 
         let offset = key_val * 8;
-        let ass_addr = (kv.index + offset) as *mut u64;
+        let ass_addr = (kvs.index_base + offset) as *mut u64;
         
         let to_put = serialize_kv_addr(KVAddr{
             addr: addr_to_put,
@@ -201,12 +203,16 @@ fn init_kv_store() -> KVS {
     }
 
 
-    KVS { index: res as u64 }
+    KVS { index_base: res as u64, index_rkey: 0, values_rkey: 0 }
 } 
 
 
 /// processes a single request, whose communication id is in id
-fn set_up_client_conn(id: *mut rdma_cm_id, init: &mut ibv_qp_init_attr, index_base_addr: u64) -> i32 {
+fn set_up_client_conn(
+    id: *mut rdma_cm_id,
+    init: &mut ibv_qp_init_attr,
+    kvs: &mut KVS,
+) -> i32 {
 
     let mut ret;
 
@@ -215,7 +221,7 @@ fn set_up_client_conn(id: *mut rdma_cm_id, init: &mut ibv_qp_init_attr, index_ba
     let mut send_msg: [u8; 64] = [0u8; 64];
     send_msg[0..test_str.len()].clone_from_slice(test_str);
 
-    let mut index_base_buf: [u8; 8] = index_base_addr.to_le_bytes();
+    let mut index_base_buf: [u8; 8] = kvs.index_base.to_le_bytes();
     
     // ---------------------------------------
     //      HANDLE CONN -- SETUP
@@ -245,31 +251,12 @@ fn set_up_client_conn(id: *mut rdma_cm_id, init: &mut ibv_qp_init_attr, index_ba
     // ---------------------------------------
 
     // Client needs index base address, index remote key, values remote key
-    
     // register mem containing pointer to index base
-
-    // register the index
-    let index_mem = reg_read(id, index_base_addr, 256 * 8).unwrap();
-    // get the remote key from the index memory region
-    let index_rkey = unsafe { (*index_mem).rkey };
-    // register the index base address
-    let _index_base_mem = reg_read(id, index_base_buf.as_ptr() as u64, index_base_buf.len()).unwrap();
-    // register the index remote key
-    let mut index_rkey_buf = index_rkey.to_le_bytes();
+    let index_mem = reg_read(id, kvs.index_base, 256*8).unwrap();
+    let mut index_rkey_buf = kvs.index_rkey.to_le_bytes();
     let index_rkey_mem = reg_read(id, index_rkey_buf.as_ptr() as u64, index_rkey_buf.len()).unwrap();
-
-    // register the values (which for now will just be the test string)
-    let values_mem = reg_read(id, send_msg.as_ptr() as u64, test_str.len()).unwrap();
-    // get values remote key
-    let values_rkey = unsafe { (*values_mem).rkey };
-    // register values remote key
-    let mut values_rkey_buf = values_rkey.to_le_bytes();
+    let mut values_rkey_buf = kvs.values_rkey.to_le_bytes();
     let values_rkey_mem = reg_read(id, values_rkey_buf.as_ptr() as u64, values_rkey_buf.len()).unwrap();
-
-
-    println!("sending index base: 0x{:x}", index_base_addr);
-    println!("sending index rkey: 0x{:x}", index_rkey);
-    println!("sending values rkey: 0x{:x}", values_rkey);
     
     // ---------------------------------------
     //      HANDLE CONN -- COMMUNICATE
@@ -293,13 +280,15 @@ fn set_up_client_conn(id: *mut rdma_cm_id, init: &mut ibv_qp_init_attr, index_ba
 
 
 /// runs a central server listener, that listens on the listen_id socket and processes requests as they come in
-fn run_server_listen(listen_id: *mut rdma_cm_id, init: &mut ibv_qp_init_attr, index_base_addr: u64) -> i32 {
-
-    let mut ret ;
+fn run_server_listen(
+    listen_id: *mut rdma_cm_id,
+    init: &mut ibv_qp_init_attr,
+    kvs: &mut KVS,
+) -> i32 {
 
     // listen for incoming conns
     // TODO would this be where the loop starts?
-    ret = unsafe { rdma_listen(listen_id, 0) };
+    let mut ret = unsafe { rdma_listen(listen_id, 0) };
     if ret != 0 {
         println!("rdma_listen");
         unsafe { rdma_destroy_ep(listen_id); }
@@ -316,7 +305,7 @@ fn run_server_listen(listen_id: *mut rdma_cm_id, init: &mut ibv_qp_init_attr, in
             return ret;
         }
 
-        ret = set_up_client_conn(id, init, index_base_addr);
+        ret = set_up_client_conn(id, init, kvs);
         if ret != 0 {
             println!("error processing request");
             return ret;
@@ -326,8 +315,12 @@ fn run_server_listen(listen_id: *mut rdma_cm_id, init: &mut ibv_qp_init_attr, in
 
 
 /// sets up the server rdma connection, then listens for incoming connections and processes them
-fn run_server(addr: &str, port: &str, index_base_addr: u64) -> i32 {
-    
+fn run_server(kvs: &mut KVS, addr: &str, port: &str) -> i32 {
+
+    let test_str = "Hello from server!".as_bytes();
+    let mut send_msg: [u8; 64] = [0u8; 64];
+    send_msg[0..test_str.len()].clone_from_slice(test_str);
+
     // create addr info
     let mut addr_info: *mut rdma_addrinfo = null_mut();
     let mut hints = unsafe { std::mem::zeroed::<rdma_addrinfo>() };
@@ -359,8 +352,21 @@ fn run_server(addr: &str, port: &str, index_base_addr: u64) -> i32 {
         return ret;
     }
 
+    // register the index
+    let index_mem = reg_read(listen_id, kvs.index_base, 256 * 8).unwrap();
+    // register the values (which for now will just be the test string)
+    let values_mem = reg_read(listen_id, send_msg.as_ptr() as u64, test_str.len()).unwrap();
+
+    kvs.index_rkey = unsafe { (*index_mem).rkey };
+    kvs.values_rkey = unsafe { (*values_mem).rkey };
+
+    println!("sending index base: 0x{:x}", kvs.index_base);
+    println!("sending index rkey: 0x{:x}", kvs.index_rkey);
+    println!("sending values rkey: 0x{:x}", kvs.values_rkey);
+
+    
     // run server
-    return run_server_listen(listen_id, &mut init, index_base_addr);
+    return run_server_listen(listen_id, &mut init, kvs);
 
 }
 
@@ -453,13 +459,13 @@ fn main() {
     send_msg[0..value.len()].clone_from_slice(value);
     let val_addr = send_msg.as_mut_ptr().cast::<u8>() as u64;
     
-    let kv = init_kv_store();
-    put_addr_in_for_all_keys(&kv, val_addr);
+    let mut kvs = init_kv_store();
+    put_addr_in_for_all_keys(&kvs, val_addr);
     
     let ret = if args.server {
-        run_server(addr, port, kv.index)
+        run_server(&mut kvs, addr, port)
     } else {
-        run_client(addr, port, kv.index)
+        run_client(addr, port, kvs.index_base)
     };
 
     if ret != 0 {
