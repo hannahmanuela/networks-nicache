@@ -34,6 +34,7 @@ enum Error {
     Connect,
     PostSend,
     PostRecv,
+    PostRead,
     WaitForSend,
     WaitForRecv,
 }
@@ -178,6 +179,43 @@ fn wait_for_recv(id: *mut rdma_cm_id) -> Result<(), Error> {
     }
     if ret < 0 {
 	return Err(Error::WaitForRecv);
+    }
+    Ok(())
+}
+
+fn post_read_and_wait(
+    id: *mut rdma_cm_id,
+    buf: &mut [u8],
+    mr: *mut ibv_mr,
+    raddr: u64,
+    rkey: u32
+) -> Result<(), Error> {
+    post_read(id, buf, mr, raddr, rkey)?;
+    wait_for_send(id)?;
+    Ok(())
+}
+
+fn post_read(
+    id: *mut rdma_cm_id,
+    buf: &mut [u8],
+    mr: *mut ibv_mr,
+    raddr: u64,
+    rkey: u32
+) -> Result<(), Error> {
+    let ret = unsafe {
+	rdma_post_read(
+	    id,
+	    null_mut(),
+	    buf.as_mut_ptr().cast(),
+	    buf.len(),
+	    mr,
+	    0,
+	    raddr,
+	    rkey
+	)
+    };
+    if ret != 0 {
+	return Err(Error::PostRead);
     }
     Ok(())
 }
@@ -363,7 +401,6 @@ fn run_server(kvs: &mut KVS, addr: &str, port: &str) -> i32 {
     println!("sending index base: 0x{:x}", kvs.index_base);
     println!("sending index rkey: 0x{:x}", kvs.index_rkey);
     println!("sending values rkey: 0x{:x}", kvs.values_rkey);
-
     
     // run server
     return run_server_listen(listen_id, &mut init, kvs);
@@ -418,12 +455,17 @@ fn run_client(addr: &str, port: &str, index_base_addr: u64) -> i32 {
     let mut index_base_buf = [0u8; 8];
     let index_base_mr = reg_read(id, index_base_buf.as_ptr() as u64, index_base_buf.len()).unwrap();
     // register mr for index rkey
-    let mut index_rkey_buf = [0u8; 8];
+    let mut index_rkey_buf = [0u8; 4];
     let index_rkey_mr = reg_read(id, index_rkey_buf.as_ptr() as u64, index_rkey_buf.len()).unwrap();
     // register mr for values rkey
-    let mut values_rkey_buf = [0u8; 8];
+    let mut values_rkey_buf = [0u8; 4];
     let values_rkey_mr = reg_read(id, values_rkey_buf.as_ptr() as u64, values_rkey_buf.len()).unwrap();
-    
+    // register mr for value ptr
+    let mut val_ptr_buf = [0u8; 8];
+    let val_ptr_mr = reg_read(id, val_ptr_buf.as_ptr() as u64, val_ptr_buf.len()).unwrap();
+    // register mr for value
+    let mut val_buf = [0u8; 8];
+    let val_mr = reg_read(id, val_buf.as_ptr() as u64, val_buf.len()).unwrap();
     // ---------------------------------------
     //      GET VALUE - RUN GETS
     // ---------------------------------------
@@ -437,9 +479,36 @@ fn run_client(addr: &str, port: &str, index_base_addr: u64) -> i32 {
     post_recv_and_wait(id, &mut values_rkey_buf, values_rkey_mr).unwrap();
     
     println!("index base: 0x{:x}", u64::from_le_bytes(index_base_buf));
-    println!("index rkey: 0x{:x}", u64::from_le_bytes(index_rkey_buf));
-    println!("values rkey: 0x{:x}", u64::from_le_bytes(values_rkey_buf));
-    0
+    println!("index rkey: 0x{:x}", u32::from_le_bytes(index_rkey_buf));
+    println!("values rkey: 0x{:x}", u32::from_le_bytes(values_rkey_buf));
+
+    // get pointer to value from index
+    post_read_and_wait(
+	id,
+	&mut val_ptr_buf,
+	val_ptr_mr,
+	u64::from_le_bytes(index_base_buf),
+	u32::from_le_bytes(index_rkey_buf),
+    ).unwrap();
+
+    println!("pointer to val: 0x{:x}", u64::from_le_bytes(val_ptr_buf));
+
+    post_read_and_wait(
+	id,
+	&mut val_buf,
+	val_mr,
+	u64::from_le_bytes(val_ptr_buf),
+	u32::from_le_bytes(values_rkey_buf),
+    ).unwrap();
+
+    let s = match std::str::from_utf8(&val_buf) {
+	Ok(v) => v,
+	Err(e) => panic!("invalid string: {}", e),
+    };
+
+    println!("value received: {}", s);
+    
+    ret
 }
 
 
