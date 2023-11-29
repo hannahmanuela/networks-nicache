@@ -399,7 +399,7 @@ fn run_server(kvs: &mut KVS, addr: &str, port: &str) -> i32 {
     // register the index
     let index_mem = reg_read(listen_id, kvs.index_base, 256 * 8).unwrap();
     // register the values (which for now will just be the test string)
-    let values_mem = reg_read(listen_id, send_msg.as_ptr() as u64, test_str.len()).unwrap();
+    let values_mem = reg_read(listen_id, val_addr, 64).unwrap();
 
     kvs.index_rkey = unsafe { (*index_mem).rkey };
     kvs.values_rkey = unsafe { (*values_mem).rkey };
