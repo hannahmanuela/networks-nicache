@@ -357,8 +357,10 @@ fn run_server(kvs: &mut KVS, addr: &str, port: &str) -> i32 {
 
     let test_str = "Hello from server!".as_bytes();
     let mut send_msg: [u8; 64] = [0u8; 64];
-    send_msg[0..test_str.len()].clone_from_slice(test_str);
+    send_msg[0..test_str.len()].copy_from_slice(test_str);
 
+    put_addr_in_for_all_keys(&kvs, send_msg.as_ptr() as u64);
+    
     // create addr info
     let mut addr_info: *mut rdma_addrinfo = null_mut();
     let mut hints = unsafe { std::mem::zeroed::<rdma_addrinfo>() };
@@ -464,7 +466,7 @@ fn run_client(addr: &str, port: &str, index_base_addr: u64) -> i32 {
     let mut val_ptr_buf = [0u8; 8];
     let val_ptr_mr = reg_read(id, val_ptr_buf.as_ptr() as u64, val_ptr_buf.len()).unwrap();
     // register mr for value
-    let mut val_buf = [0u8; 8];
+    let mut val_buf = [0u8; 64];
     let val_mr = reg_read(id, val_buf.as_ptr() as u64, val_buf.len()).unwrap();
     // ---------------------------------------
     //      GET VALUE - RUN GETS
@@ -529,7 +531,6 @@ fn main() {
     let val_addr = send_msg.as_mut_ptr().cast::<u8>() as u64;
     
     let mut kvs = init_kv_store();
-    put_addr_in_for_all_keys(&kvs, val_addr);
     
     let ret = if args.server {
         run_server(&mut kvs, addr, port)
