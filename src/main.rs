@@ -358,8 +358,12 @@ fn run_server(kvs: &mut KVS, addr: &str, port: &str) -> i32 {
     let test_str = "Hello from server!".as_bytes();
     let mut send_msg: [u8; 64] = [0u8; 64];
     send_msg[0..test_str.len()].copy_from_slice(test_str);
+    let val_addr = send_msg.as_ptr() as u64;
+    
+    put_addr_in_for_all_keys(&kvs, val_addr);
 
-    put_addr_in_for_all_keys(&kvs, send_msg.as_ptr() as u64);
+    println!("val addr: 0x{:x}", val_addr);
+    
     
     // create addr info
     let mut addr_info: *mut rdma_addrinfo = null_mut();
