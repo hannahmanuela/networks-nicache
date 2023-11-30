@@ -7,18 +7,25 @@ use libc::c_void;
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    #[arg(short, long)]
-    server: bool,
-    #[arg(short, long)]
-    addr: String,
-    #[arg(short, long)]
-    port: String,
+    #[arg(long)]
+    host: bool,
+    #[arg(long)]
+    cache: bool,
+    #[arg(long)]
+    client:bool,
+    cache_addr: String,
+    host_addr: String, 
+    #[arg(default_value = "8080")]
+    port: String, // just have cache and host use the same port for now
 }
 
 struct KVS {
-    index_base: u64,
-    index_rkey: u32,
-    values_rkey: u32,
+    cached_index_base: u64,
+    cached_index_rkey: u32,
+    cached_values_rkey: u32,
+    host_index_base: u64,
+    host_index_rkey: u32,
+    host_values_rkey: u32,
 }
 
 struct KVAddr {
@@ -32,12 +39,20 @@ enum Error {
     RegisterMem,
     Accept,
     Connect,
+    Listen,
+    GetRequest,
     PostSend,
     PostRecv,
     PostRead,
     WaitForSend,
     WaitForRecv,
+    GetAddrInfo,
+    CreateEp,
 }
+
+const N_KEYS: usize = 256;
+const KEY_SIZE: usize = 8;
+const INDEX_SIZE: usize = N_KEYS * KEY_SIZE;
 
 fn serialize_kv_addr(struct_kv: KVAddr) -> u64 {
 
@@ -67,16 +82,18 @@ fn deserialize_kv_addr(addr_val: u64) -> KVAddr {
 
 
 /// places a serialized kvaddr for all 8-bit keys, starting at base_pointer, that point to addr_to_put
-fn put_addr_in_for_all_keys(kvs: &KVS, addr_to_put: u64) {
+fn put_addr_in_for_all_keys(kvs: &KVS, addr_to_put: u64, cache: bool) {
 
-    for key_val in 0..256 {
+    let idx_base = if cache { kvs.cached_index_base } else { kvs.host_index_base };
+    
+    for key_val in 0..N_KEYS as u64 {
 
         let offset = key_val * 8;
-        let ass_addr = (kvs.index_base + offset) as *mut u64;
+        let ass_addr = (idx_base + offset) as *mut u64;
         
         let to_put = serialize_kv_addr(KVAddr{
             addr: addr_to_put,
-            is_cached: true,
+            is_cached: cache,
             num_accesses: 0,});
         
         unsafe { *ass_addr = to_put };
@@ -115,6 +132,24 @@ fn connect(id: *mut rdma_cm_id) -> Result<(), Error> {
     if ret != 0 {
         unsafe { rdma_disconnect(id) };
 	return Err(Error::Connect);
+    }
+    Ok(())
+}
+
+fn listen(id: *mut rdma_cm_id) -> Result<(), Error> {
+    let mut ret = unsafe { rdma_listen(id, 0) };
+    if ret != 0 {
+        unsafe { rdma_destroy_ep(id); }
+        return Err(Error::Listen);
+    }
+    Ok(())
+}
+
+fn get_request(listen_id: *mut rdma_cm_id, id: *mut *mut rdma_cm_id) -> Result<(), Error> {
+    let ret = unsafe { rdma_get_request(listen_id, id) };
+    if ret != 0 {
+        unsafe { rdma_destroy_ep(listen_id); }
+        return Err(Error::GetRequest);
     }
     Ok(())
 }
@@ -221,7 +256,7 @@ fn post_read(
 }
 
 /// initialize the key value store by memmaping a region of memory that can hold 256 addresses, returning the base pointer of the mapped region
-fn init_kv_store() -> KVS {
+fn init_kv_store(cache: bool) -> KVS {
 
     // TODO is this correct?
     let key_size: usize = 256 * 8;
@@ -239,9 +274,17 @@ fn init_kv_store() -> KVS {
     if res == libc::MAP_FAILED {
 	panic!("mapping KVS memory failed");
     }
-
-
-    KVS { index_base: res as u64, index_rkey: 0, values_rkey: 0 }
+    
+    // client and host will have their own kvs structs
+    // they will coordinate at runtime and fill out the rest of the entries
+    KVS {
+	cached_index_base: if cache { res as u64 }  else {  0 },
+	cached_index_rkey: 0,
+	cached_values_rkey: 0,
+	host_index_base: if !cache { res as u64 } else { 0 },
+	host_index_rkey: 0,
+	host_values_rkey: 0,
+    }
 } 
 
 
@@ -259,7 +302,7 @@ fn set_up_client_conn(
     let mut send_msg: [u8; 64] = [0u8; 64];
     send_msg[0..test_str.len()].clone_from_slice(test_str);
 
-    let mut index_base_buf: [u8; 8] = kvs.index_base.to_le_bytes();
+    let mut cached_index_base_buf: [u8; 8] = [0u8; 8];
     
     // ---------------------------------------
     //      HANDLE CONN -- SETUP
@@ -288,13 +331,15 @@ fn set_up_client_conn(
     //      HANDLE CONN -- REGISTER
     // ---------------------------------------
 
-    // Client needs index base address, index remote key, values remote key
+    // Client needs index base address, index remote key, cache values rkey, host values rkey
     // register mem containing pointer to index base
-    let index_mem = reg_read(id, kvs.index_base, 256*8).unwrap();
-    let mut index_rkey_buf = kvs.index_rkey.to_le_bytes();
-    let index_rkey_mem = reg_read(id, index_rkey_buf.as_ptr() as u64, index_rkey_buf.len()).unwrap();
-    let mut values_rkey_buf = kvs.values_rkey.to_le_bytes();
-    let values_rkey_mem = reg_read(id, values_rkey_buf.as_ptr() as u64, values_rkey_buf.len()).unwrap();
+    let cached_index_mem = reg_read(id, kvs.cached_index_base, 256*8).unwrap();
+    let mut cached_index_rkey_buf = kvs.cached_index_rkey.to_le_bytes();
+    let cached_index_rkey_mem = reg_read(id, cached_index_rkey_buf.as_ptr() as u64, cached_index_rkey_buf.len()).unwrap();
+    let mut cached_values_rkey_buf = kvs.cached_values_rkey.to_le_bytes();
+    let cached_values_rkey_mem = reg_read(id, cached_values_rkey_buf.as_ptr() as u64, cached_values_rkey_buf.len()).unwrap();
+    let mut host_values_rkey_buf = kvs.host_values_rkey.to_le_bytes();
+    let host_values_rkey_mem = reg_read(id, host_values_rkey_buf.as_ptr() as u64, host_values_rkey_buf.len()).unwrap();
     
     // ---------------------------------------
     //      HANDLE CONN -- COMMUNICATE
@@ -304,11 +349,13 @@ fn set_up_client_conn(
     accept(id).unwrap();
 
     // send the index address (this posts it to the send queue)
-    post_send_and_wait(id, &mut index_base_buf, index_mem, send_flags).unwrap();
+    post_send_and_wait(id, &mut cached_index_base_buf, cached_index_mem, send_flags).unwrap();
     // send the index rkey
-    post_send_and_wait(id, &mut index_rkey_buf, index_rkey_mem, send_flags).unwrap();
-    // send the values remote key
-    post_send_and_wait(id, &mut values_rkey_buf, values_rkey_mem, send_flags).unwrap();
+    post_send_and_wait(id, &mut cached_index_rkey_buf, cached_index_rkey_mem, send_flags).unwrap();
+    // send the cached values remote key
+    post_send_and_wait(id, &mut cached_values_rkey_buf, cached_values_rkey_mem, send_flags).unwrap();
+    // send the host values remote key
+    post_send_and_wait(id, &mut host_values_rkey_buf, host_values_rkey_mem, send_flags).unwrap();
 
     // send the value region remote key
     
@@ -351,6 +398,156 @@ fn run_server_listen(
     }
 }
 
+fn run_cache(host_addr: &str, cache_addr: &str, port: &str) -> Result<(), Error> {
+    // create the KVS / index
+    // the index will only live on the cache
+    // - how is the index initially populated?
+    // - should the host construct the index, then the cache asks for it and copies it into memory?
+    // - this might be easier and could be done once at startup at least in our prototype
+
+    let test_str = "Hello from cache!".as_bytes();
+    let mut send_msg: [u8; 64] = [0u8; 64];
+    send_msg[0..test_str.len()].copy_from_slice(test_str);
+    let val_addr = send_msg.as_ptr() as u64;
+
+    // inits a cache-local view of the kv store
+    let mut kvs = init_kv_store(true);
+
+    let mut host_index_base_buf = [0u8; 8];
+    let mut host_index_rkey_buf = [0u8; 4];
+    let mut host_values_rkey_buf = [0u8; 4];
+
+    // set up connection to host
+    let mut host_id: *mut rdma_cm_id = null_mut();
+    let mut init = unsafe { std::mem::zeroed::<ibv_qp_init_attr>() };
+    init.cap.max_send_wr = 3;
+    init.cap.max_recv_wr = 3;
+    init.cap.max_send_sge = 3;
+    init.cap.max_recv_sge = 3;
+    init.cap.max_inline_data = 64;
+    init.sq_sig_all = 1;
+    
+    get_new_cm_id(host_addr, port, &mut host_id, &mut init)?;
+
+
+    Ok(())
+}
+
+fn run_host(host_addr: &str, cache_addr: &str, port: &str) -> Result<(), Error> {
+    // create the KVS / index
+    // - for this toy example, the host will populate all entries of the index with
+    let test_str = "Hello from host!".as_bytes();
+    let mut send_msg: [u8; 64] = [0u8; 64];
+    send_msg[0..test_str.len()].copy_from_slice(test_str);
+    let val_addr = send_msg.as_ptr() as u64;
+    
+    let mut kvs = init_kv_store(false);
+    put_addr_in_for_all_keys(&kvs, val_addr, false);
+
+    // setup rdma
+    let mut init = unsafe { std::mem::zeroed::<ibv_qp_init_attr>() };
+    init.cap.max_send_wr = 3;
+    init.cap.max_recv_wr = 3;
+    init.cap.max_send_sge = 3;
+    init.cap.max_recv_sge = 3;
+    init.cap.max_inline_data = 64;
+    init.sq_sig_all = 1;
+
+    // create new connection
+    let mut listen_id: *mut rdma_cm_id = null_mut();
+    get_new_cm_id(host_addr, port, &mut listen_id, &mut init).unwrap();
+
+    // register the index
+    let index_mem = reg_read(listen_id, kvs.host_index_base, INDEX_SIZE).unwrap();
+    // register the value(s)
+    let values_mem = reg_read(listen_id, val_addr, send_msg.len()).unwrap();
+
+    kvs.host_index_rkey = unsafe { (*index_mem).rkey };
+    kvs.host_values_rkey = unsafe { (*values_mem).rkey };
+
+    setup_cache(&mut kvs, listen_id, cache_addr)?;
+
+    return run_host_listen();    
+}
+
+fn setup_cache(kvs: &mut KVS, listen_id: *mut rdma_cm_id, cache_addr: &str) -> Result<(), Error> {
+    //wait for cache to connect
+    //the order is: host runs, cache runs and connects to host, client runs and connects to cache
+    //this is fine because the cache won't listen for connections until it connects to the host
+
+    //I imagine the fastest way to do this is to have the client set up a connection to
+    //both the cache and the host at startup time, then the cache and host maintain those
+    //connections while the client does some READs
+
+    //when the host/cache start, they will need to provide both their own address and the other's
+    //address so they can communicate to set things up.
+
+    // here is the flow of the whole thing:
+    // host starts, creates its own index and populates it with values, listen for cache connection
+    // cache starts, connects to host
+    // cache reads index from host, filling keys with some of its own values, and setting the cached bit
+    // client starts, connects to cache (needs host and client addresses)
+    // client connects to host
+    // client gets the base address of the cached index
+    // client reads some keys from the cached index and uses the bit to determine whether
+    //   the key is on the host or the cache
+
+    listen(listen_id)?;
+
+    let mut cache_id: *mut rdma_cm_id = null_mut();
+    get_request(listen_id, &mut cache_id)?;
+
+    // register index for reads
+    // post send for host index base
+    // post send for host values rkey
+    // post send for host index rkey
+
+    let host_index_mem = reg_read(cache_id, kvs.host_index_base, INDEX_SIZE)?;
+
+    let mut host_index_base_buf = kvs.host_index_base.to_le_bytes();
+    let host_index_base_mem = reg_read(cache_id, host_index_base_buf.as_ptr() as u64, host_index_base_buf.len()).unwrap();
+    
+    let mut host_index_rkey_buf = kvs.host_index_rkey.to_le_bytes();
+    let host_index_rkey_mem = reg_read(cache_id, host_index_rkey_buf.as_ptr() as u64, host_index_rkey_buf.len()).unwrap();
+    
+    let mut host_values_rkey_buf = kvs.host_index_rkey.to_le_bytes();
+    let host_values_rkey_mem = reg_read(cache_id, host_index_rkey_buf.as_ptr() as u64, host_index_rkey_buf.len()).unwrap();
+
+    // accept connection from cache
+    accept(listen_id)?;
+
+    // post sends for all three
+    post_send_and_wait(cache_id, &mut host_index_base_buf, host_index_base_mem, 0)?;
+    post_send_and_wait(cache_id, &mut host_index_rkey_buf, host_index_rkey_mem, 0)?;
+    post_send_and_wait(cache_id, &mut host_values_rkey_buf, host_values_rkey_mem, 0)?;
+    
+    Ok(())
+}
+
+fn run_host_listen() -> Result<(), Error> {
+    Ok(())
+}
+
+fn get_new_cm_id(addr: &str, port: &str, id: *mut *mut rdma_cm_id, init: &mut ibv_qp_init_attr) -> Result<(), Error> {
+    // create addr info
+    let mut addr_info: *mut rdma_addrinfo = null_mut();
+    let mut hints = unsafe { std::mem::zeroed::<rdma_addrinfo>() };
+    hints.ai_flags = RAI_PASSIVE.try_into().unwrap();
+    hints.ai_port_space = rdma_port_space::RDMA_PS_TCP as i32;
+    let mut ret =
+    unsafe { rdma_getaddrinfo(addr.as_ptr().cast(), port.as_ptr().cast(), &hints, &mut addr_info) };
+    if ret != 0 {
+        return Err(Error::GetAddrInfo);
+    }
+    ret = unsafe { rdma_create_ep(id, addr_info, null_mut(), init) };
+    if ret != 0 {
+        unsafe { rdma_freeaddrinfo(addr_info); }
+        return Err(Error::CreateEp);
+    }
+    
+    Ok(())
+}
+
 
 /// sets up the server rdma connection, then listens for incoming connections and processes them
 fn run_server(kvs: &mut KVS, addr: &str, port: &str) -> i32 {
@@ -360,25 +557,12 @@ fn run_server(kvs: &mut KVS, addr: &str, port: &str) -> i32 {
     send_msg[0..test_str.len()].copy_from_slice(test_str);
     let val_addr = send_msg.as_ptr() as u64;
     
-    put_addr_in_for_all_keys(&kvs, val_addr);
+    put_addr_in_for_all_keys(&kvs, val_addr, false);
 
     println!("val addr: 0x{:x}", val_addr);
     
     
-    // create addr info
-    let mut addr_info: *mut rdma_addrinfo = null_mut();
-    let mut hints = unsafe { std::mem::zeroed::<rdma_addrinfo>() };
-    hints.ai_flags = RAI_PASSIVE.try_into().unwrap();
-    hints.ai_port_space = rdma_port_space::RDMA_PS_TCP as i32;
-    let mut ret =
-    unsafe { rdma_getaddrinfo(addr.as_ptr().cast(), port.as_ptr().cast(), &hints, &mut addr_info) };
-    if ret != 0 {
-        println!("rdma_getaddrinfo");
-        return ret;
-    }
 
-    // initalize queues
-    // TODO: do we like these values long-term
     let mut init = unsafe { std::mem::zeroed::<ibv_qp_init_attr>() };
     init.cap.max_send_wr = 2;
     init.cap.max_recv_wr = 2;
@@ -388,25 +572,20 @@ fn run_server(kvs: &mut KVS, addr: &str, port: &str) -> i32 {
     init.sq_sig_all = 1;
 
     // create a socket in listen_id
-    let mut listen_id = null_mut();
-    ret = unsafe { rdma_create_ep(&mut listen_id, addr_info, null_mut(), &mut init) };
-    if ret != 0 {
-        println!("rdma_create_ep");
-        unsafe { rdma_freeaddrinfo(addr_info); }
-        return ret;
-    }
+    let mut listen_id: *mut rdma_cm_id = null_mut();
+    get_new_cm_id(addr, port, &mut listen_id, &mut init).unwrap();
 
     // register the index
-    let index_mem = reg_read(listen_id, kvs.index_base, 256 * 8).unwrap();
-    // register the values (which for now will just be the test string)
-    let values_mem = reg_read(listen_id, val_addr, 64).unwrap();
+    // let index_mem = reg_read(listen_id, kvs.index_base, 256 * 8).unwrap();
+    // // register the values (which for now will just be the test string)
+    // let values_mem = reg_read(listen_id, val_addr, 64).unwrap();
 
-    kvs.index_rkey = unsafe { (*index_mem).rkey };
-    kvs.values_rkey = unsafe { (*values_mem).rkey };
+    // kvs.index_rkey = unsafe { (*index_mem).rkey };
+    // kvs.values_rkey = unsafe { (*values_mem).rkey };
 
-    println!("sending index base: 0x{:x}", kvs.index_base);
-    println!("sending index rkey: 0x{:x}", kvs.index_rkey);
-    println!("sending values rkey: 0x{:x}", kvs.values_rkey);
+    // println!("sending index base: 0x{:x}", kvs.index_base);
+    // println!("sending index rkey: 0x{:x}", kvs.index_rkey);
+    // println!("sending values rkey: 0x{:x}", kvs.values_rkey);
     
     // run server
     return run_server_listen(listen_id, &mut init, kvs);
@@ -414,7 +593,7 @@ fn run_server(kvs: &mut KVS, addr: &str, port: &str) -> i32 {
 }
 
 
-fn run_client(addr: &str, port: &str, index_base_addr: u64) -> i32 {
+fn run_client(addr: &str, port: &str) -> i32 {
 
     // ---------------------------------------
     //      SETUP
@@ -488,31 +667,37 @@ fn run_client(addr: &str, port: &str, index_base_addr: u64) -> i32 {
     println!("index rkey: 0x{:x}", u32::from_le_bytes(index_rkey_buf));
     println!("values rkey: 0x{:x}", u32::from_le_bytes(values_rkey_buf));
 
-    // get pointer to value from index
-    post_read_and_wait(
-	id,
-	&mut val_ptr_buf,
-	val_ptr_mr,
-	u64::from_le_bytes(index_base_buf),
-	u32::from_le_bytes(index_rkey_buf),
-    ).unwrap();
 
-    println!("pointer to val: 0x{:x}", u64::from_le_bytes(val_ptr_buf));
+    for x in 0..8 {
+    
+	// get pointer to value from index
+	post_read_and_wait(
+	    id,
+	    &mut val_ptr_buf,
+	    val_ptr_mr,
+	    u64::from_le_bytes(index_base_buf) + (8 * x),
+	    u32::from_le_bytes(index_rkey_buf),
+	).unwrap();
 
-    post_read_and_wait(
-	id,
-	&mut val_buf,
-	val_mr,
-	u64::from_le_bytes(val_ptr_buf),
-	u32::from_le_bytes(values_rkey_buf),
-    ).unwrap();
-
-    let s = match std::str::from_utf8(&val_buf) {
-	Ok(v) => v,
-	Err(e) => panic!("invalid string: {}", e),
-    };
-
-    println!("value received: {}", s);
+	//sanity check
+	println!("pointer to val: 0x{:x}", u64::from_le_bytes(val_ptr_buf));
+	
+	post_read_and_wait(
+	    id,
+	    &mut val_buf,
+	    val_mr,
+	    u64::from_le_bytes(val_ptr_buf),
+	    u32::from_le_bytes(values_rkey_buf),
+	).unwrap();
+	
+	let s = match std::str::from_utf8(&val_buf) {
+	    Ok(v) => v,
+	    Err(e) => panic!("invalid string: {}", e),
+	};
+	
+	//also sanity check
+	println!("value received: {}", s);
+    }
     
     ret
 }
@@ -520,38 +705,24 @@ fn run_client(addr: &str, port: &str, index_base_addr: u64) -> i32 {
 
 
 fn main() {
-
     // initialize args
     let mut args = Args::parse();
-    args.addr.push_str("\0");
+
     args.port.push_str("\0");
-    let addr = args.addr.as_str();
     let port = args.port.as_str();
 
-    // initalize KV store (for now all keys will point to the same value, which is a string that says hello from server)
-    let value = "Hello from server!".as_bytes();
-    let mut send_msg: [u8; 64] = [0u8; 64];
-    send_msg[0..value.len()].clone_from_slice(value);
-    let val_addr = send_msg.as_mut_ptr().cast::<u8>() as u64;
-    
-    let mut kvs = init_kv_store();
-    
-    let ret = if args.server {
-        run_server(&mut kvs, addr, port)
-    } else {
-        run_client(addr, port, kvs.index_base)
-    };
+    args.host_addr.push_str("\0");
+    let host_addr = args.host_addr.as_str();
 
-    if ret != 0 {
-        println!(
-            "rdma_client: ret error {:?}",
-            std::io::Error::from_raw_os_error(-ret)
-        );
-        if ret == -1 {
-            println!(
-                "rdma_client: last os error {:?}",
-                std::io::Error::last_os_error()
-            );
-        }
+    args.cache_addr.push_str("\0");
+    let cache_addr = args.cache_addr.as_str();
+    
+    if args.host {
+	println!("Starting host KVS");
+    } else if args.cache {
+	println!("Starting cache KVS");
+	// client is straightforward
+    } else if args.client {
+	println!("Starting client"); 
     }
 }
