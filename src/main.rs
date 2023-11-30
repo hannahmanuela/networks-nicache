@@ -35,11 +35,11 @@ struct Args {
 // here is the flow of the whole thing:
 // host starts, creates its own index and populates it with values, listen for soc connection
 // soc starts, connects to host
-// soc reads index from host, filling keys with some of its own values, and setting the socd bit
+// soc reads index from host, filling keys with some of its own values, and setting the cached bit
 // client starts, connects to soc (needs host and client addresses)
 // client connects to host
-// client gets the base address of the socd index
-// client reads some keys from the socd index and uses the bit to determine whether
+// client gets the base address of the cached index
+// client reads some keys from the cached index and uses the bit to determine whether
 //   the key is on the host or the soc
 
 fn main() {
@@ -63,6 +63,6 @@ fn main() {
         soc::run_soc(host_addr, soc_addr, port).unwrap();
     } else if args.client {
 	    println!("Starting client"); 
-        client::run_client(soc_addr, port).unwrap();
+        client::run_client(soc_addr, port, host_addr, port).unwrap();
     }
 }

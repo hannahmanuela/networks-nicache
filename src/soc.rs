@@ -11,12 +11,7 @@ fn set_up_client_conn(
     kvs: KVS,
 ) -> Result<(), Error> {
 
-    // a dummy test, this will later place the index (and the initial values?)
-    let test_str = "Hello from server!".as_bytes();
-    let mut send_msg: [u8; 64] = [0u8; 64];
-    send_msg[0..test_str.len()].clone_from_slice(test_str);
-
-    let mut socd_index_base_buf: [u8; 8] = [0u8; 8];
+    let mut index_base_buf: [u8; 8] = [0u8; 8];
     
     // ---------------------------------------
     //      HANDLE CONN -- SETUP
@@ -40,15 +35,12 @@ fn set_up_client_conn(
     //      HANDLE CONN -- REGISTER
     // ---------------------------------------
 
-    // Client needs index base address, index remote key, soc values rkey, host values rkey
-    // register mem containing pointer to index base
-    let socd_index_mem = reg_read(id, kvs.soc_index_base, N_KEYS*8).unwrap();
-    let mut socd_index_rkey_buf = kvs.soc_index_rkey.to_le_bytes();
-    let socd_index_rkey_mem = reg_read(id, socd_index_rkey_buf.as_ptr() as u64, socd_index_rkey_buf.len()).unwrap();
-    let mut socd_values_rkey_buf = kvs.soc_values_rkey.to_le_bytes();
-    let socd_values_rkey_mem = reg_read(id, socd_values_rkey_buf.as_ptr() as u64, socd_values_rkey_buf.len()).unwrap();
-    let mut host_values_rkey_buf = kvs.host_values_rkey.to_le_bytes();
-    let host_values_rkey_mem = reg_read(id, host_values_rkey_buf.as_ptr() as u64, host_values_rkey_buf.len()).unwrap();
+    // Client needs index base address, index remote key, values rkey
+    let index_mem = reg_read(id, kvs.soc_index_base, 256*8).unwrap();
+    let mut index_rkey_buf = kvs.soc_index_rkey.to_le_bytes();
+    let index_rkey_mem = reg_read(id, index_rkey_buf.as_ptr() as u64, index_rkey_buf.len()).unwrap();
+    let mut values_rkey_buf = kvs.soc_values_rkey.to_le_bytes();
+    let values_rkey_mem = reg_read(id, values_rkey_buf.as_ptr() as u64, values_rkey_buf.len()).unwrap();
     
     // ---------------------------------------
     //      HANDLE CONN -- COMMUNICATE
@@ -58,16 +50,13 @@ fn set_up_client_conn(
     accept(id).unwrap();
 
     // send the index address (this posts it to the send queue)
-    post_send_and_wait(id, &mut socd_index_base_buf, socd_index_mem, send_flags).unwrap();
+    post_send_and_wait(id, &mut index_base_buf, index_mem, send_flags).unwrap();
     // send the index rkey
-    post_send_and_wait(id, &mut socd_index_rkey_buf, socd_index_rkey_mem, send_flags).unwrap();
-    // send the socd values remote key
-    post_send_and_wait(id, &mut socd_values_rkey_buf, socd_values_rkey_mem, send_flags).unwrap();
-    // send the host values remote key
-    post_send_and_wait(id, &mut host_values_rkey_buf, host_values_rkey_mem, send_flags).unwrap();
+    post_send_and_wait(id, &mut index_rkey_buf, index_rkey_mem, send_flags).unwrap();
+    // send the cached values remote key
+    post_send_and_wait(id, &mut values_rkey_buf, values_rkey_mem, send_flags).unwrap();
 
     // send the value region remote key
-    
     Ok(())
 
 }

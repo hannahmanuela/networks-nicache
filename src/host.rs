@@ -4,6 +4,40 @@ use std::ptr::null_mut;
 use crate::rdma_utils::*;
 use crate::kv_store::*;
 
+
+fn setup_client_conn(
+    id: *mut rdma_cm_id,
+    init: &mut ibv_qp_init_attr,
+    kvs: KVS,
+) -> Result<(), Error> {
+    // "gets the attributes specified in attr_mask for the
+    //    new conns qp and returns them through the pointers qp_attr (which we never use again) and init"
+    let mut qp_attr = unsafe { std::mem::zeroed::<ibv_qp_attr>() };
+    query_qp(id, &mut qp_attr, init).unwrap();
+
+    // check that the queue allows for at least 64 bits inline
+    // TODO why 64? What's this sge which presumable is the default?
+    let mut send_flags = 0;
+    if init.cap.max_inline_data >= 64 {
+        send_flags = ibv_send_flags::IBV_SEND_INLINE.0;
+    } else {
+        println!("rdma server: device doesn't support IBV_SEND_INLINE, using sge sends");
+    }
+
+    // Client needs index base address, index remote key, soc values rkey, host values rkey
+    // register mem containing pointer to index base
+    let mut host_values_rkey_buf = kvs.host_values_rkey.to_le_bytes();
+    let host_values_rkey_mem = reg_read(id, host_values_rkey_buf.as_ptr() as u64, host_values_rkey_buf.len()).unwrap();
+    
+    // officially accept client connection
+    accept(id).unwrap();
+
+    // send the host values remote key
+    post_send_and_wait(id, &mut host_values_rkey_buf, host_values_rkey_mem, send_flags).unwrap();
+    
+    Ok(())
+}
+
 /// waits for the SoC to connect, then sends it the index base, and keys to read the index as well as the value(s)
 fn setup_soc(kvs: &mut KVS, val_addr: u64, send_msg: [u8; 64],  listen_id: *mut rdma_cm_id, soc_addr: &str) -> Result<(), Error> {
     
@@ -45,7 +79,16 @@ fn setup_soc(kvs: &mut KVS, val_addr: u64, send_msg: [u8; 64],  listen_id: *mut 
 fn run_host_listen(listen_id: *mut rdma_cm_id,
     init: &mut ibv_qp_init_attr,
     kvs: KVS) -> Result<(), Error> {
-    Ok(())
+
+    // listen for incoming conns
+    listen(listen_id).unwrap();
+
+    loop {
+        // put received conn in id
+        let mut id: *mut rdma_cm_id = null_mut();
+        get_request(listen_id, &mut id).unwrap();
+        setup_client_conn(id, init, kvs).unwrap();
+    }
 }
 
 pub fn run_host(host_addr: &str, soc_addr: &str, port: &str) -> Result<(), Error> {

@@ -19,9 +19,9 @@ pub struct KVS {
 }
 
 pub struct KVAddr {
-    addr: u64,
-    is_socd: bool,
-    num_accesses: u8
+    pub addr: u64,
+    pub is_cached: bool,
+    pub num_accesses: u8
 }
 
 pub fn serialize_kv_addr(struct_kv: KVAddr) -> u64 {
@@ -29,7 +29,7 @@ pub fn serialize_kv_addr(struct_kv: KVAddr) -> u64 {
     let mut to_ret: u64;
 
     to_ret = struct_kv.addr;
-    if !struct_kv.is_socd {
+    if !struct_kv.is_cached {
         to_ret = to_ret + 1;
     }
     let accesses: u64 = struct_kv.num_accesses as u64;
@@ -40,14 +40,14 @@ pub fn serialize_kv_addr(struct_kv: KVAddr) -> u64 {
 
 pub fn deserialize_kv_addr(addr_val: u64) -> KVAddr {
 
-    let socd_bit = addr_val & 1;
+    let cached_bit = addr_val & 1;
     let num_accesses: u64 = addr_val >> 50;
     let trunc_num_accesses: u8 = num_accesses as u8;
 
     let addr_no_access = (addr_val << 14) >> 14;
-    let addr_no_socd_bit = (addr_no_access >> 1) << 1;
+    let addr_no_cached_bit = (addr_no_access >> 1) << 1;
 
-    return KVAddr { addr: addr_no_socd_bit, is_socd: socd_bit == 1, num_accesses: trunc_num_accesses };
+    return KVAddr { addr: addr_no_cached_bit, is_cached: cached_bit == 1, num_accesses: trunc_num_accesses };
 }
 
 /// places a serialized kvaddr for all 8-bit keys, starting at base_pointer, that point to addr_to_put
@@ -74,7 +74,7 @@ pub fn put_addr_in_index_for_appropriate_keys(kvs: &KVS, addr_to_put: u64, soc: 
         
         let to_put = serialize_kv_addr(KVAddr{
             addr: addr_to_put,
-            is_socd: soc,
+            is_cached: soc,
             num_accesses: 0,});
         
         unsafe { *ass_addr = to_put };
