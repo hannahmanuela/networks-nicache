@@ -1,6 +1,4 @@
 use clap::Parser;
-use rdma_sys::*;
-use std::ptr::null_mut;
 
 
 mod kv_store;
@@ -57,7 +55,7 @@ fn main() {
     
     if args.host {
 	    println!("Starting host KVS");
-        host::run_host(host_addr, soc_addr, port).unwrap();
+        host::run_host(host_addr, port).unwrap();
     } else if args.soc {
 	    println!("Starting SoC KVS");
         soc::run_soc(host_addr, soc_addr, port).unwrap();

@@ -5,7 +5,7 @@ use crate::rdma_utils::*;
 use crate::kv_store::*;
 
 /// processes a single request, whose communication id is in id
-fn set_up_client_conn(
+fn setup_client_conn(
     id: *mut rdma_cm_id,
     init: &mut ibv_qp_init_attr,
     kvs: KVS,
@@ -76,14 +76,13 @@ fn run_soc_client_listen(
         // put received conn in id
         let mut id: *mut rdma_cm_id = null_mut();
         get_request(listen_id, &mut id).unwrap();
-        set_up_client_conn(id, init, kvs).unwrap();
+        setup_client_conn(id, init, kvs).unwrap();
     }
 }
 
 ///wait for the host to connect, then gets its partial KVStore?
-fn run_host_setup(
+fn setup_host(
     host_conn_id: *mut rdma_cm_id,
-    init: &mut ibv_qp_init_attr,
     kvs: &mut KVS,
 ) -> Result<(), Error> {
 
@@ -150,7 +149,7 @@ pub fn run_soc(host_addr: &str, soc_addr: &str, port: &str) -> Result<(), Error>
     
     let mut host_id: *mut rdma_cm_id = null_mut();
     get_new_cm_id(host_addr, port, &mut host_id, &mut host_init, false)?;
-    run_host_setup(host_id, &mut host_init, &mut kvs).unwrap();
+    setup_host(host_id, &mut kvs).unwrap();
 
     // need to now write full index
     let test_str = "Hello from soc!".as_bytes();

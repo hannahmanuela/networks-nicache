@@ -39,7 +39,7 @@ fn setup_client_conn(
 }
 
 /// waits for the SoC to connect, then sends it the index base, and keys to read the index as well as the value(s)
-fn setup_soc(kvs: &mut KVS, val_addr: u64, send_msg: [u8; 64],  listen_id: *mut rdma_cm_id, soc_addr: &str) -> Result<(), Error> {
+fn setup_soc(kvs: &mut KVS, val_addr: u64, send_msg: [u8; 64],  listen_id: *mut rdma_cm_id) -> Result<(), Error> {
     
     //wait for soc to connect
     listen(listen_id)?;
@@ -91,7 +91,7 @@ fn run_host_listen(listen_id: *mut rdma_cm_id,
     }
 }
 
-pub fn run_host(host_addr: &str, soc_addr: &str, port: &str) -> Result<(), Error> {
+pub fn run_host(host_addr: &str, port: &str) -> Result<(), Error> {
     // create the KVS / index
     // - for this toy example, the host will populate all entries of the index with
     let test_str = "Hello from host!".as_bytes();
@@ -115,7 +115,7 @@ pub fn run_host(host_addr: &str, soc_addr: &str, port: &str) -> Result<(), Error
     let mut listen_id: *mut rdma_cm_id = null_mut();
     get_new_cm_id(host_addr, port, &mut listen_id, &mut init, true).unwrap();
 
-    setup_soc(&mut kvs, val_addr, send_msg, listen_id, soc_addr)?;
+    setup_soc(&mut kvs, val_addr, send_msg, listen_id)?;
 
     run_host_listen(listen_id, &mut init, kvs)
 }

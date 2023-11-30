@@ -48,7 +48,7 @@ pub fn connect(id: *mut rdma_cm_id) -> Result<(), Error> {
 }
 
 pub fn listen(id: *mut rdma_cm_id) -> Result<(), Error> {
-    let mut ret = unsafe { rdma_listen(id, 0) };
+    let ret = unsafe { rdma_listen(id, 0) };
     if ret != 0 {
         unsafe { rdma_destroy_ep(id); }
         return Err(Error::Listen);
