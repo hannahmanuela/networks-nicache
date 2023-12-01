@@ -122,6 +122,7 @@ fn setup_host(
     let mut curr_val_addr_buf: [u8; 8] = [0u8; 8];
     let curr_value_mr = reg_read(host_conn_id, curr_val_addr_buf.as_ptr() as u64, curr_val_addr_buf.len()).unwrap();
 
+    println!("index base addr: 0x{:x}", kvs.soc_index_base);
     // read index from host
     for key_val in 0..N_KEYS_ON_HOST as u64 {
         // read addresses (already serialized) into buffer
@@ -129,6 +130,7 @@ fn setup_host(
         // write address to soc's index
         let offset = key_val * 8;
         let ass_addr = (kvs.soc_index_base + offset) as *mut u64;
+        println!("writing host val addr at index addr: 0x{:x}", kvs.soc_index_base + offset);
         unsafe { *ass_addr =  u64::from_le_bytes(curr_val_addr_buf) };
     }
 
