@@ -142,7 +142,7 @@ fn do_request(
         soc_conn.index_base + (offset * 8),
         soc_conn.index_read_key,
     )?;
-    let mut elapsed = start_time.elapsed().as_nanos();
+    let elapsed = start_time.elapsed().as_nanos();
     println!("after index read: {}ns", elapsed);
     let start_time_2 = Instant::now();
     // deserialize the address
@@ -152,7 +152,7 @@ fn do_request(
     } else {
         &host_conn
     };
-    let mut elapsed = start_time_2.elapsed().as_nanos();
+    let elapsed = start_time_2.elapsed().as_nanos();
     println!("after index read: {}ns", elapsed);
     let start_time_3: Instant = Instant::now();
     // read value from appropriate source
@@ -163,7 +163,7 @@ fn do_request(
         kv_addr.addr,
         conn_to_use.val_read_key,
     )?;
-    let mut elapsed = start_time_3.elapsed().as_nanos();
+    let elapsed = start_time_3.elapsed().as_nanos();
     println!("after index read: {}ns", elapsed);
     Ok(())
 }
