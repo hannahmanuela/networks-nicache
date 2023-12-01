@@ -44,6 +44,8 @@ pub fn deserialize_kv_addr(addr_val: u64) -> KVAddr {
     let num_accesses: u64 = addr_val >> 50;
     let trunc_num_accesses: u8 = num_accesses as u8;
 
+    println!("cached bit: {}", cached_bit);
+
     let addr_no_access = (addr_val << 14) >> 14;
     let addr_no_cached_bit = (addr_no_access >> 1) << 1;
 
