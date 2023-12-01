@@ -149,7 +149,6 @@ fn setup_host(
         // write address to soc's index
         let offset = key_val * 8;
         let ass_addr = (kvs.soc_index_base + offset) as *mut u64;
-        println!("writing host val addr at index addr: 0x{:x}", kvs.soc_index_base + offset);
         unsafe { *ass_addr =  u64::from_le_bytes(curr_val_addr_buf) };
     }
 
