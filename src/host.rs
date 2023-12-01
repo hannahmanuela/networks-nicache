@@ -84,9 +84,6 @@ fn run_host_listen(listen_id: *mut rdma_cm_id,
     init: &mut ibv_qp_init_attr,
     kvs: KVS) -> Result<(), Error> {
 
-    // listen for incoming conns
-    listen(listen_id).unwrap();
-
     loop {
         // put received conn in id
         let mut id: *mut rdma_cm_id = null_mut();
