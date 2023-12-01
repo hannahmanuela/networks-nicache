@@ -139,12 +139,12 @@ pub fn post_read_and_wait(
 ) -> Result<(), Error> {
     let now = Instant::now();
     post_read(id, buf, mr, raddr, rkey)?;
-    let elapsed = now.elapsed().as_nanos();
-    println!("after post read: {}ns", elapsed);
+    // let elapsed = now.elapsed().as_nanos();
+    // println!("after post read: {}ns", elapsed);
 
-    let now1 = Instant::now();
+    // let now1 = Instant::now();
     wait_for_send(id)?;
-    let elapsed = now1.elapsed().as_nanos();
+    let elapsed = now.elapsed().as_nanos();
     println!("after wait for send: {}ns", elapsed);
     Ok(())
 }
