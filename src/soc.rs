@@ -10,8 +10,6 @@ fn setup_client_conn(
     init: &mut ibv_qp_init_attr,
     kvs: KVS,
 ) -> Result<(), Error> {
-
-    let mut index_base_buf: [u8; 8] = [0u8; 8];
     
     // ---------------------------------------
     //      HANDLE CONN -- SETUP
@@ -37,7 +35,7 @@ fn setup_client_conn(
 
     // Client needs index base address, index remote key, values rkey
     println!("sending index base addr: 0x{:x}", kvs.soc_index_base);
-    index_base_buf = kvs.soc_index_base.to_le_bytes();
+    let mut index_base_buf = kvs.soc_index_base.to_le_bytes();
     let index_mem = reg_read(id, kvs.soc_index_base, 256*8).unwrap();
     let mut index_rkey_buf = kvs.soc_index_rkey.to_le_bytes();
     let index_rkey_mem = reg_read(id, index_rkey_buf.as_ptr() as u64, index_rkey_buf.len()).unwrap();
@@ -82,6 +80,25 @@ fn run_soc_client_listen(
         println!("got client conn");
         setup_client_conn(id, init, kvs).unwrap();
     }
+}
+
+/// register memory that clients will need access to
+/// right now is just the index, and the dummy value
+fn register_mem(
+    id: *mut rdma_cm_id,
+    kvs: &mut KVS,
+    val_addr: u64,
+    val_size: usize
+) -> Result<(), Error> {
+    // register the index
+    let index_mem = reg_read(id, kvs.soc_index_base, INDEX_SIZE).unwrap();
+    // register the values (which for now will just be the test string)
+    let values_mem = reg_read(id, val_addr, val_size).unwrap();
+
+    kvs.soc_index_rkey = unsafe { (*index_mem).rkey };
+    kvs.soc_values_rkey = unsafe { (*values_mem).rkey };
+
+     Ok(())
 }
 
 ///wait for the host to connect, then gets its partial KVStore?
@@ -181,5 +198,9 @@ pub fn run_soc(host_addr: &str, soc_addr: &str, port: &str) -> Result<(), Error>
     client_init.sq_sig_all = 1;
     let mut client_listen_id: *mut rdma_cm_id = null_mut();
     get_new_cm_id(soc_addr, port, &mut client_listen_id, &mut client_init, true)?;
+    
+    // register memory that clients will need
+    register_mem(client_listen_id, &mut kvs, val_addr, send_msg.len()).unwrap();
+    // loop to accept client connections
     run_soc_client_listen(client_listen_id, &mut client_init, kvs)
 }
