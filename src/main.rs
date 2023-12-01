@@ -33,11 +33,10 @@ struct Args {
 // here is the flow of the whole thing:
 // host starts, creates its own index and populates it with values, listen for soc connection
 // soc starts, connects to host
-// soc reads index from host, filling keys with some of its own values, and setting the cached bit
+// soc reads index from host, filling keys with some of its own values
 // client starts, connects to soc (needs host and client addresses)
 // client connects to host
-// client gets the base address of the cached index
-// client reads some keys from the cached index and uses the bit to determine whether
+// client gets the base address of the cached index, using the cached bit to determine whether
 //   the key is on the host or the soc
 
 fn main() {
