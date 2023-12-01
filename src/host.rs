@@ -51,29 +51,24 @@ fn setup_soc(kvs: &mut KVS, val_addr: u64, send_msg: [u8; 64],  listen_id: *mut 
     // REGISTRATION STUFF
 
     // register the index
-    let index_mem = reg_read(listen_id, kvs.host_index_base, INDEX_SIZE).unwrap();
+    let index_mem = reg_read(soc_id, kvs.host_index_base, INDEX_SIZE).unwrap();
     kvs.host_index_rkey = unsafe { (*index_mem).rkey };
-    println!("here1");
     // register the value(s)
-    let values_mem = reg_read(listen_id, val_addr, send_msg.len()).unwrap();
+    let values_mem = reg_read(soc_id, val_addr, send_msg.len()).unwrap();
     kvs.host_values_rkey = unsafe { (*values_mem).rkey };
-    println!("here2");
 
     // put all of the values into buffers, register those
     let mut host_index_base_buf = kvs.host_index_base.to_le_bytes();
     let host_index_base_mem = reg_read(soc_id, host_index_base_buf.as_ptr() as u64, host_index_base_buf.len()).unwrap();
-    println!("here3");
 
     let mut host_index_rkey_buf = kvs.host_index_rkey.to_le_bytes();
     let host_index_rkey_mem = reg_read(soc_id, host_index_rkey_buf.as_ptr() as u64, host_index_rkey_buf.len()).unwrap();
-    println!("here4");
     
     let mut host_values_rkey_buf = kvs.host_values_rkey.to_le_bytes();
     let host_values_rkey_mem = reg_read(soc_id, host_values_rkey_buf.as_ptr() as u64, host_values_rkey_buf.len()).unwrap();
-    println!("here5");
 
     // accept connection from soc
-    accept(listen_id)?;
+    accept(soc_id)?;
 
     println!("sending vals");
     // post sends for all three
