@@ -1,4 +1,6 @@
 use std::ptr::null_mut;
+use std::time::Instant;
+use rand::{thread_rng, Rng};
 use rdma_sys::*;
 use crate::{rdma_utils::*, deserialize_kv_addr};
 
@@ -124,6 +126,97 @@ fn setup_soc_conn(addr: &str, port: &str, addr_buf: &mut [u8; 8], val_buf: &mut 
     Ok(conn)
 }
 
+#[inline(always)]
+fn do_request(
+    soc_conn: &Connection,
+    host_conn: &Connection,
+    addr_buf: &mut [u8; 8],
+    val_buf: &mut [u8; 64],
+    offset: u64,
+) -> Result<(), Error> {
+    post_read_and_wait(
+        soc_conn.conn_id,
+        addr_buf,
+        soc_conn.addr_mr,
+        soc_conn.index_base + (offset * 8),
+        soc_conn.index_read_key,
+    )?;
+    // deserialize the address
+    let kv_addr = deserialize_kv_addr(u64::from_le_bytes(*addr_buf));
+    let conn_to_use = if kv_addr.is_cached {
+        &soc_conn
+    } else {
+        &host_conn
+    };
+    // read value from appropriate source
+    post_read_and_wait(
+        conn_to_use.conn_id,
+        val_buf,
+        conn_to_use.val_mr,
+        kv_addr.addr,
+        conn_to_use.val_read_key,
+    )?;
+    Ok(())
+}
+
+fn run_latency(
+    soc_conn: &Connection,
+    host_conn: &Connection,
+    addr_buf: &mut [u8; 8],
+    val_buf: &mut [u8; 64],
+) -> Result<(), Error> {
+    //generate 10000 random indicies to read from
+    let mut rng = thread_rng();
+    let mut reqs: Vec<u64> = Vec::new();
+    for _ in 0..10000 {
+        reqs.push(rng.gen_range(0..256));
+    }
+    // do 10k requests and measure latency each time
+    for offset in reqs {
+        let now = Instant::now();
+        // get address from index
+        do_request(soc_conn, host_conn, addr_buf, val_buf, offset)?;
+        let elapsed = now.elapsed().as_nanos();
+
+        println!("{}ns", elapsed);
+    }
+    Ok(())
+}
+
+fn run_throughput(
+    soc_conn: &Connection,
+    host_conn: &Connection,
+    addr_buf: &mut [u8; 8],
+    val_buf: &mut [u8; 64],
+) -> Result<(), Error> {
+    let now = Instant::now();
+    let mut req_count = 0;
+    // run for 30 seconds
+    while now.elapsed().as_secs() < 30 {
+        let offset: u64 = rand::thread_rng().gen_range(0..256);
+        do_request(soc_conn, host_conn, addr_buf, val_buf, offset)?;
+        req_count += 1;
+    }
+
+    println!(
+        "{} requests in 30 seconds = {}reqs/s",
+        req_count,
+        req_count / 30
+    );
+    Ok(())
+}
+
+fn run_benchmark(
+    soc_conn: &Connection,
+    host_conn: &Connection,
+    addr_buf: &mut [u8; 8],
+    val_buf: &mut [u8; 64],
+) -> Result<(), Error> {
+    run_latency(soc_conn, host_conn, addr_buf, val_buf)?;
+    run_throughput(soc_conn, host_conn, addr_buf, val_buf)?;
+
+    Ok(())
+}
 
 pub fn run_client(soc_addr: &str, soc_port: &str, host_addr: &str, host_port: &str) -> Result<(), Error> {
 
@@ -139,67 +232,7 @@ pub fn run_client(soc_addr: &str, soc_port: &str, host_addr: &str, host_port: &s
     //      GET VALUE - RUN GETS
     // ---------------------------------------
 
-    // these keys should for now be on the host
-    for x in 0..8 {
-        // get pointer to value from index
-        post_read_and_wait(soc_conn.conn_id, &mut addr_buf, soc_conn.addr_mr, soc_conn.index_base + (8 * x), 
-        soc_conn.index_read_key,).unwrap();
-
-        //sanity check
-        println!("pointer to val: 0x{:x}", u64::from_le_bytes(addr_buf));
-
-        let kv_addr = deserialize_kv_addr(u64::from_le_bytes(addr_buf));
-        let conn_to_use = if kv_addr.is_cached {
-            println!("val is on soc");
-            &soc_conn
-        } else {
-            println!("val is on host");
-            &host_conn
-        };
-
-        
-        post_read_and_wait(conn_to_use.conn_id, &mut val_buf, conn_to_use.val_mr, kv_addr.addr,
-            conn_to_use.val_read_key,).unwrap();
-        
-        let s = match std::str::from_utf8(&val_buf) {
-            Ok(v) => v,
-            Err(e) => panic!("invalid string: {}", e),
-        };
-        
-        //also sanity check
-        println!("value received: {}", s);
-    }
-
-    // these keys should for now be on the soc
-    for x in 250..256 {
-        // get pointer to value from index
-        post_read_and_wait(soc_conn.conn_id, &mut addr_buf, soc_conn.addr_mr, soc_conn.index_base + (8 * x), 
-        soc_conn.index_read_key,).unwrap();
-
-        //sanity check
-        println!("pointer to val: 0x{:x}", u64::from_le_bytes(addr_buf));
-
-        let kv_addr = deserialize_kv_addr(u64::from_le_bytes(addr_buf));
-        let conn_to_use = if kv_addr.is_cached {
-            println!("val is on soc");
-            &soc_conn
-        } else {
-            println!("val is on host");
-            &host_conn
-        };
-
-        
-        post_read_and_wait(conn_to_use.conn_id, &mut val_buf, conn_to_use.val_mr, kv_addr.addr,
-            conn_to_use.val_read_key,).unwrap();
-        
-        let s = match std::str::from_utf8(&val_buf) {
-            Ok(v) => v,
-            Err(e) => panic!("invalid string: {}", e),
-        };
-        
-        //also sanity check
-        println!("value received: {}", s);
-    }
+    run_benchmark(&soc_conn, &host_conn, &mut addr_buf, &mut val_buf)?;
     
     Ok(())
 }
