@@ -69,6 +69,7 @@ fn run_soc_client_listen(
     kvs: KVS,
 ) -> Result<(), Error> {
 
+    println!("listening for client conns");
     // listen for incoming conns
     listen(listen_id).unwrap();
 
@@ -76,6 +77,7 @@ fn run_soc_client_listen(
         // put received conn in id
         let mut id: *mut rdma_cm_id = null_mut();
         get_request(listen_id, &mut id).unwrap();
+        println!("got client conn");
         setup_client_conn(id, init, kvs).unwrap();
     }
 }
@@ -101,11 +103,14 @@ fn setup_host(
     // GET VALUES
     // connect using socket in id
     connect(host_conn_id).unwrap();
+    println!("connected to host");
  
     // wait for host to send remote addr - post it to recv queue
     post_recv_and_wait(host_conn_id, &mut host_index_base_buf, index_base_mr).unwrap();
     post_recv_and_wait(host_conn_id, &mut host_index_rkey_buf, index_rkey_mr).unwrap();
     post_recv_and_wait(host_conn_id, &mut host_values_rkey_buf, values_rkey_mr).unwrap();
+
+    println!("got vals from host");
 
     // write gotten values into kvs
     kvs.host_index_base = u64::from_le_bytes(host_index_base_buf);
@@ -127,6 +132,8 @@ fn setup_host(
         unsafe { *ass_addr =  u64::from_le_bytes(curr_val_addr_buf) };
     }
 
+    println!("wrote to index");
+
     Ok(())
 }
 
@@ -147,6 +154,7 @@ pub fn run_soc(host_addr: &str, soc_addr: &str, port: &str) -> Result<(), Error>
     host_init.cap.max_inline_data = 64;
     host_init.sq_sig_all = 1;
     
+    println!("setting up host conn");
     let mut host_id: *mut rdma_cm_id = null_mut();
     get_new_cm_id(host_addr, port, &mut host_id, &mut host_init, false)?;
     setup_host(host_id, &mut kvs).unwrap();

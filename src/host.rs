@@ -41,10 +41,12 @@ fn setup_client_conn(
 /// waits for the SoC to connect, then sends it the index base, and keys to read the index as well as the value(s)
 fn setup_soc(kvs: &mut KVS, val_addr: u64, send_msg: [u8; 64],  listen_id: *mut rdma_cm_id) -> Result<(), Error> {
     
+    println!("listening for soc");
     //wait for soc to connect
     listen(listen_id)?;
     let mut soc_id: *mut rdma_cm_id = null_mut();
     get_request(listen_id, &mut soc_id)?;
+    println!("got soc conn");
 
     // REGISTRATION STUFF
 
@@ -68,10 +70,12 @@ fn setup_soc(kvs: &mut KVS, val_addr: u64, send_msg: [u8; 64],  listen_id: *mut 
     // accept connection from soc
     accept(listen_id)?;
 
+    println!("sending vals");
     // post sends for all three
     post_send_and_wait(soc_id, &mut host_index_base_buf, host_index_base_mem, 0)?;
     post_send_and_wait(soc_id, &mut host_index_rkey_buf, host_index_rkey_mem, 0)?;
     post_send_and_wait(soc_id, &mut host_values_rkey_buf, host_values_rkey_mem, 0)?;
+    println!("sent vals");
     
     Ok(())
 }
@@ -87,6 +91,7 @@ fn run_host_listen(listen_id: *mut rdma_cm_id,
         // put received conn in id
         let mut id: *mut rdma_cm_id = null_mut();
         get_request(listen_id, &mut id).unwrap();
+        println!("got client conn!");
         setup_client_conn(id, init, kvs).unwrap();
     }
 }
@@ -99,6 +104,7 @@ pub fn run_host(host_addr: &str, port: &str) -> Result<(), Error> {
     send_msg[0..test_str.len()].copy_from_slice(test_str);
     let val_addr = send_msg.as_ptr() as u64;
     
+    println!("creating kv store");
     let mut kvs = init_kv_store(false);
     put_addr_in_index_for_appropriate_keys(&kvs, val_addr, false);
 
@@ -111,11 +117,13 @@ pub fn run_host(host_addr: &str, port: &str) -> Result<(), Error> {
     init.cap.max_inline_data = 64;
     init.sq_sig_all = 1;
 
+    println!("creating listener for soc");
     // create new connection
     let mut listen_id: *mut rdma_cm_id = null_mut();
     get_new_cm_id(host_addr, port, &mut listen_id, &mut init, true).unwrap();
 
     setup_soc(&mut kvs, val_addr, send_msg, listen_id)?;
 
+    println!("listening for clients now");
     run_host_listen(listen_id, &mut init, kvs)
 }

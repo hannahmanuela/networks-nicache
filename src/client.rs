@@ -130,7 +130,9 @@ pub fn run_client(soc_addr: &str, soc_port: &str, host_addr: &str, host_port: &s
     let mut val_buf = [0u8; 64];
     let mut addr_buf = [0u8; 8];
 
+    println!("setting up soc conn");
     let soc_conn = setup_soc_conn(soc_addr, soc_port, &mut addr_buf, &mut val_buf).unwrap();
+    println!("setting up host conn");
     let host_conn = setup_host_conn(host_addr, host_port, &mut val_buf).unwrap();
     
     // ---------------------------------------
@@ -148,8 +150,10 @@ pub fn run_client(soc_addr: &str, soc_port: &str, host_addr: &str, host_port: &s
 
         let kv_addr = deserialize_kv_addr(u64::from_le_bytes(addr_buf));
         let conn_to_use = if kv_addr.is_cached {
+            println!("val is on soc");
             &soc_conn
         } else {
+            println!("val is on host");
             &host_conn
         };
 
