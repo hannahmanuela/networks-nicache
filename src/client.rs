@@ -168,7 +168,7 @@ fn run_latency(
     //generate 10000 random indicies to read from
     let mut rng = thread_rng();
     let mut reqs: Vec<u64> = Vec::new();
-    for _ in 0..10000 {
+    for _ in 0..500 {
         reqs.push(rng.gen_range(0..256));
     }
     // do 10k requests and measure latency each time
