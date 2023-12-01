@@ -37,6 +37,7 @@ fn setup_client_conn(
 
     // Client needs index base address, index remote key, values rkey
     println!("sending index base addr: 0x{:x}", kvs.soc_index_base);
+    index_base_buf = kvs.soc_index_base.to_le_bytes();
     let index_mem = reg_read(id, kvs.soc_index_base, 256*8).unwrap();
     let mut index_rkey_buf = kvs.soc_index_rkey.to_le_bytes();
     let index_rkey_mem = reg_read(id, index_rkey_buf.as_ptr() as u64, index_rkey_buf.len()).unwrap();
