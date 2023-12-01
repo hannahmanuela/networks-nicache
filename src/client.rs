@@ -139,8 +139,39 @@ pub fn run_client(soc_addr: &str, soc_port: &str, host_addr: &str, host_port: &s
     //      GET VALUE - RUN GETS
     // ---------------------------------------
 
-
+    // these keys should for now be on the host
     for x in 0..8 {
+        // get pointer to value from index
+        post_read_and_wait(soc_conn.conn_id, &mut addr_buf, soc_conn.addr_mr, soc_conn.index_base + (8 * x), 
+        soc_conn.index_read_key,).unwrap();
+
+        //sanity check
+        println!("pointer to val: 0x{:x}", u64::from_le_bytes(addr_buf));
+
+        let kv_addr = deserialize_kv_addr(u64::from_le_bytes(addr_buf));
+        let conn_to_use = if kv_addr.is_cached {
+            println!("val is on soc");
+            &soc_conn
+        } else {
+            println!("val is on host");
+            &host_conn
+        };
+
+        
+        post_read_and_wait(conn_to_use.conn_id, &mut val_buf, conn_to_use.val_mr, kv_addr.addr,
+            conn_to_use.val_read_key,).unwrap();
+        
+        let s = match std::str::from_utf8(&val_buf) {
+            Ok(v) => v,
+            Err(e) => panic!("invalid string: {}", e),
+        };
+        
+        //also sanity check
+        println!("value received: {}", s);
+    }
+
+    // these keys should for now be on the soc
+    for x in 250..256 {
         // get pointer to value from index
         post_read_and_wait(soc_conn.conn_id, &mut addr_buf, soc_conn.addr_mr, soc_conn.index_base + (8 * x), 
         soc_conn.index_read_key,).unwrap();
