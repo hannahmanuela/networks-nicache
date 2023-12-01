@@ -133,6 +133,7 @@ fn do_request(
     addr_buf: &mut [u8; 8],
     val_buf: &mut [u8; 64],
     offset: u64,
+    start_time: Instant
 ) -> Result<(), Error> {
     post_read_and_wait(
         soc_conn.conn_id,
@@ -141,6 +142,9 @@ fn do_request(
         soc_conn.index_base + (offset * 8),
         soc_conn.index_read_key,
     )?;
+    let mut elapsed = start_time.elapsed().as_nanos();
+    println!("after index read: {}ns", elapsed);
+    let start_time_2 = Instant::now();
     // deserialize the address
     let kv_addr = deserialize_kv_addr(u64::from_le_bytes(*addr_buf));
     let conn_to_use = if kv_addr.is_cached {
@@ -148,6 +152,9 @@ fn do_request(
     } else {
         &host_conn
     };
+    let mut elapsed = start_time_2.elapsed().as_nanos();
+    println!("after index read: {}ns", elapsed);
+    let start_time_3: Instant = Instant::now();
     // read value from appropriate source
     post_read_and_wait(
         conn_to_use.conn_id,
@@ -156,6 +163,8 @@ fn do_request(
         kv_addr.addr,
         conn_to_use.val_read_key,
     )?;
+    let mut elapsed = start_time_3.elapsed().as_nanos();
+    println!("after index read: {}ns", elapsed);
     Ok(())
 }
 
@@ -168,14 +177,14 @@ fn run_latency(
     //generate 10000 random indicies to read from
     let mut rng = thread_rng();
     let mut reqs: Vec<u64> = Vec::new();
-    for _ in 0..500 {
+    for _ in 0..10 {
         reqs.push(rng.gen_range(0..256));
     }
     // do 10k requests and measure latency each time
     for offset in reqs {
         let now = Instant::now();
         // get address from index
-        do_request(soc_conn, host_conn, addr_buf, val_buf, offset)?;
+        do_request(soc_conn, host_conn, addr_buf, val_buf, offset, now)?;
         let elapsed = now.elapsed().as_nanos();
 
         println!("{}ns", elapsed);
@@ -194,7 +203,7 @@ fn run_throughput(
     // run for 30 seconds
     while now.elapsed().as_secs() < 30 {
         let offset: u64 = rand::thread_rng().gen_range(0..256);
-        do_request(soc_conn, host_conn, addr_buf, val_buf, offset)?;
+        do_request(soc_conn, host_conn, addr_buf, val_buf, offset, Instant::now())?;
         req_count += 1;
     }
 
@@ -213,7 +222,7 @@ fn run_benchmark(
     val_buf: &mut [u8; 64],
 ) -> Result<(), Error> {
     run_latency(soc_conn, host_conn, addr_buf, val_buf)?;
-    run_throughput(soc_conn, host_conn, addr_buf, val_buf)?;
+    // run_throughput(soc_conn, host_conn, addr_buf, val_buf)?;
 
     Ok(())
 }
