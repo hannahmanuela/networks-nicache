@@ -10,8 +10,6 @@ fn setup_client_conn(
     init: &mut ibv_qp_init_attr,
     kvs: KVS,
 ) -> Result<(), Error> {
-
-    let mut index_base_buf: [u8; 8] = [0u8; 8];
     
     // ---------------------------------------
     //      HANDLE CONN -- SETUP
@@ -36,6 +34,8 @@ fn setup_client_conn(
     // ---------------------------------------
 
     // Client needs index base address, index remote key, values rkey
+    println!("sending index base addr: 0x{:x}", kvs.soc_index_base);
+    let mut index_base_buf = kvs.soc_index_base.to_le_bytes();
     let index_mem = reg_read(id, kvs.soc_index_base, 256*8).unwrap();
     let mut index_rkey_buf = kvs.soc_index_rkey.to_le_bytes();
     let index_rkey_mem = reg_read(id, index_rkey_buf.as_ptr() as u64, index_rkey_buf.len()).unwrap();
@@ -69,6 +69,7 @@ fn run_soc_client_listen(
     kvs: KVS,
 ) -> Result<(), Error> {
 
+    println!("listening for client conns");
     // listen for incoming conns
     listen(listen_id).unwrap();
 
@@ -76,8 +77,28 @@ fn run_soc_client_listen(
         // put received conn in id
         let mut id: *mut rdma_cm_id = null_mut();
         get_request(listen_id, &mut id).unwrap();
+        println!("got client conn");
         setup_client_conn(id, init, kvs).unwrap();
     }
+}
+
+/// register memory that clients will need access to
+/// right now is just the index, and the dummy value
+fn register_mem(
+    id: *mut rdma_cm_id,
+    kvs: &mut KVS,
+    val_addr: u64,
+    val_size: usize
+) -> Result<(), Error> {
+    // register the index
+    let index_mem = reg_read(id, kvs.soc_index_base, INDEX_SIZE).unwrap();
+    // register the values (which for now will just be the test string)
+    let values_mem = reg_read(id, val_addr, val_size).unwrap();
+
+    kvs.soc_index_rkey = unsafe { (*index_mem).rkey };
+    kvs.soc_values_rkey = unsafe { (*values_mem).rkey };
+
+     Ok(())
 }
 
 ///wait for the host to connect, then gets its partial KVStore?
@@ -101,11 +122,14 @@ fn setup_host(
     // GET VALUES
     // connect using socket in id
     connect(host_conn_id).unwrap();
+    println!("connected to host");
  
     // wait for host to send remote addr - post it to recv queue
     post_recv_and_wait(host_conn_id, &mut host_index_base_buf, index_base_mr).unwrap();
     post_recv_and_wait(host_conn_id, &mut host_index_rkey_buf, index_rkey_mr).unwrap();
     post_recv_and_wait(host_conn_id, &mut host_values_rkey_buf, values_rkey_mr).unwrap();
+
+    println!("got vals from host");
 
     // write gotten values into kvs
     kvs.host_index_base = u64::from_le_bytes(host_index_base_buf);
@@ -117,6 +141,7 @@ fn setup_host(
     let mut curr_val_addr_buf: [u8; 8] = [0u8; 8];
     let curr_value_mr = reg_read(host_conn_id, curr_val_addr_buf.as_ptr() as u64, curr_val_addr_buf.len()).unwrap();
 
+    println!("index base addr: 0x{:x}", kvs.soc_index_base);
     // read index from host
     for key_val in 0..N_KEYS_ON_HOST as u64 {
         // read addresses (already serialized) into buffer
@@ -126,6 +151,8 @@ fn setup_host(
         let ass_addr = (kvs.soc_index_base + offset) as *mut u64;
         unsafe { *ass_addr =  u64::from_le_bytes(curr_val_addr_buf) };
     }
+
+    println!("wrote to index");
 
     Ok(())
 }
@@ -147,6 +174,7 @@ pub fn run_soc(host_addr: &str, soc_addr: &str, port: &str) -> Result<(), Error>
     host_init.cap.max_inline_data = 64;
     host_init.sq_sig_all = 1;
     
+    println!("setting up host conn");
     let mut host_id: *mut rdma_cm_id = null_mut();
     get_new_cm_id(host_addr, port, &mut host_id, &mut host_init, false)?;
     setup_host(host_id, &mut kvs).unwrap();
@@ -169,5 +197,9 @@ pub fn run_soc(host_addr: &str, soc_addr: &str, port: &str) -> Result<(), Error>
     client_init.sq_sig_all = 1;
     let mut client_listen_id: *mut rdma_cm_id = null_mut();
     get_new_cm_id(soc_addr, port, &mut client_listen_id, &mut client_init, true)?;
+    
+    // register memory that clients will need
+    register_mem(client_listen_id, &mut kvs, val_addr, send_msg.len()).unwrap();
+    // loop to accept client connections
     run_soc_client_listen(client_listen_id, &mut client_init, kvs)
 }

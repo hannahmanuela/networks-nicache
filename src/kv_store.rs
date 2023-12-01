@@ -47,7 +47,7 @@ pub fn deserialize_kv_addr(addr_val: u64) -> KVAddr {
     let addr_no_access = (addr_val << 14) >> 14;
     let addr_no_cached_bit = (addr_no_access >> 1) << 1;
 
-    return KVAddr { addr: addr_no_cached_bit, is_cached: cached_bit == 1, num_accesses: trunc_num_accesses };
+    return KVAddr { addr: addr_no_cached_bit, is_cached: cached_bit == 0, num_accesses: trunc_num_accesses };
 }
 
 /// places a serialized kvaddr for all 8-bit keys, starting at base_pointer, that point to addr_to_put

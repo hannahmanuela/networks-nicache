@@ -41,18 +41,20 @@ fn setup_client_conn(
 /// waits for the SoC to connect, then sends it the index base, and keys to read the index as well as the value(s)
 fn setup_soc(kvs: &mut KVS, val_addr: u64, send_msg: [u8; 64],  listen_id: *mut rdma_cm_id) -> Result<(), Error> {
     
+    println!("listening for soc");
     //wait for soc to connect
     listen(listen_id)?;
     let mut soc_id: *mut rdma_cm_id = null_mut();
     get_request(listen_id, &mut soc_id)?;
+    println!("got soc conn");
 
     // REGISTRATION STUFF
 
     // register the index
-    let index_mem = reg_read(listen_id, kvs.host_index_base, INDEX_SIZE).unwrap();
+    let index_mem = reg_read(soc_id, kvs.host_index_base, INDEX_SIZE).unwrap();
     kvs.host_index_rkey = unsafe { (*index_mem).rkey };
     // register the value(s)
-    let values_mem = reg_read(listen_id, val_addr, send_msg.len()).unwrap();
+    let values_mem = reg_read(soc_id, val_addr, send_msg.len()).unwrap();
     kvs.host_values_rkey = unsafe { (*values_mem).rkey };
 
     // put all of the values into buffers, register those
@@ -66,12 +68,14 @@ fn setup_soc(kvs: &mut KVS, val_addr: u64, send_msg: [u8; 64],  listen_id: *mut 
     let host_values_rkey_mem = reg_read(soc_id, host_values_rkey_buf.as_ptr() as u64, host_values_rkey_buf.len()).unwrap();
 
     // accept connection from soc
-    accept(listen_id)?;
+    accept(soc_id)?;
 
+    println!("sending vals");
     // post sends for all three
     post_send_and_wait(soc_id, &mut host_index_base_buf, host_index_base_mem, 0)?;
     post_send_and_wait(soc_id, &mut host_index_rkey_buf, host_index_rkey_mem, 0)?;
     post_send_and_wait(soc_id, &mut host_values_rkey_buf, host_values_rkey_mem, 0)?;
+    println!("sent vals");
     
     Ok(())
 }
@@ -80,13 +84,11 @@ fn run_host_listen(listen_id: *mut rdma_cm_id,
     init: &mut ibv_qp_init_attr,
     kvs: KVS) -> Result<(), Error> {
 
-    // listen for incoming conns
-    listen(listen_id).unwrap();
-
     loop {
         // put received conn in id
         let mut id: *mut rdma_cm_id = null_mut();
         get_request(listen_id, &mut id).unwrap();
+        println!("got client conn!");
         setup_client_conn(id, init, kvs).unwrap();
     }
 }
@@ -99,6 +101,7 @@ pub fn run_host(host_addr: &str, port: &str) -> Result<(), Error> {
     send_msg[0..test_str.len()].copy_from_slice(test_str);
     let val_addr = send_msg.as_ptr() as u64;
     
+    println!("creating kv store");
     let mut kvs = init_kv_store(false);
     put_addr_in_index_for_appropriate_keys(&kvs, val_addr, false);
 
@@ -111,11 +114,13 @@ pub fn run_host(host_addr: &str, port: &str) -> Result<(), Error> {
     init.cap.max_inline_data = 64;
     init.sq_sig_all = 1;
 
+    println!("creating listener for soc");
     // create new connection
     let mut listen_id: *mut rdma_cm_id = null_mut();
     get_new_cm_id(host_addr, port, &mut listen_id, &mut init, true).unwrap();
 
     setup_soc(&mut kvs, val_addr, send_msg, listen_id)?;
 
+    println!("listening for clients now");
     run_host_listen(listen_id, &mut init, kvs)
 }
