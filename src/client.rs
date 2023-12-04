@@ -1,6 +1,5 @@
 use std::{ptr::null_mut, time::Duration};
 use std::time::Instant;
-use libc::c_float;
 use rand::{thread_rng, Rng};
 use rdma_sys::*;
 use crate::{rdma_utils::*, deserialize_kv_addr};
@@ -134,7 +133,6 @@ fn do_request(
     addr_buf: &mut [u8; 8],
     val_buf: &mut [u8; 64],
     offset: u64,
-    start_time: Instant
 ) -> Result<(Instant, Instant, bool), Error> {
     post_read_and_wait(
         soc_conn.conn_id,
@@ -185,7 +183,7 @@ fn run_latency(
     for offset in reqs {
         let now = Instant::now();
         // get address from index
-        let (time_after_addr, time_after_val, on_host) = do_request(soc_conn, host_conn, addr_buf, val_buf, offset, now)?;
+        let (time_after_addr, time_after_val, on_host) = do_request(soc_conn, host_conn, addr_buf, val_buf, offset)?;
         let time_to_addr = time_after_addr - now;
         sum_get_addr_time = sum_get_addr_time + time_to_addr;
         let time_to_val = time_after_val - time_after_addr;
@@ -215,7 +213,7 @@ fn run_throughput(
     // run for 30 seconds
     while now.elapsed().as_secs() < 30 {
         let offset: u64 = rand::thread_rng().gen_range(0..256);
-        do_request(soc_conn, host_conn, addr_buf, val_buf, offset, Instant::now())?;
+        do_request(soc_conn, host_conn, addr_buf, val_buf, offset)?;
         req_count += 1;
     }
 

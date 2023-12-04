@@ -1,5 +1,4 @@
 use std::ptr::null_mut;
-use std::time::Instant;
 use rdma_sys::*;
 use libc::c_void;
 
