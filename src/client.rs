@@ -179,6 +179,8 @@ fn run_latency(
     let mut sum_get_addr_time: Duration = Duration::from_secs(0);
     let mut sum_get_val_time_soc: Duration = Duration::from_secs(0);
     let mut sum_get_val_time_host: Duration = Duration::from_secs(0);
+    let mut num_host_iters = 0;
+    let mut num_soc_iters = 0;
     // do 10k requests and measure latency each time
     for offset in reqs {
         let now = Instant::now();
@@ -189,13 +191,15 @@ fn run_latency(
         let time_to_val = time_after_val - time_after_addr;
         if on_host {
             sum_get_val_time_host = sum_get_val_time_host + time_to_val;
+            num_host_iters += 1;
         } else {
             sum_get_val_time_soc = sum_get_val_time_soc + time_to_val;
+            num_soc_iters += 1;
         }
     }
     let avg_get_addr_time = sum_get_addr_time /  num_iters;
-    let avg_get_val_time_soc = sum_get_val_time_soc / num_iters;
-    let avg_get_val_time_host = sum_get_val_time_host / num_iters;
+    let avg_get_val_time_soc = sum_get_val_time_soc / num_soc_iters;
+    let avg_get_val_time_host = sum_get_val_time_host / num_host_iters;
     println!("avg_get_addr_time in nanos: {}", avg_get_addr_time.as_nanos());
     println!("avg_get_val_time_soc in nanos: {}", avg_get_val_time_soc.as_nanos());
     println!("avg_get_val_time_host in nanos: {}", avg_get_val_time_host.as_nanos());
