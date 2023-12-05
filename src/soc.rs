@@ -157,7 +157,24 @@ fn setup_host(
     Ok(())
 }
 
+fn init_mem() -> u64 {
+    let res = unsafe {
+	libc::mmap(
+	    null_mut(),
+	    MEM_SIZE, 
+	    libc::PROT_READ | libc::PROT_WRITE,
+	    libc::MAP_ANONYMOUS | libc::MAP_PRIVATE,
+	    0,
+	    0,
+	)
+    };
 
+    if res == libc::MAP_FAILED {
+	panic!("mapping KVS memory failed");
+    }
+
+    return res as u64;
+}
 
 /// sets up the soc rdma connection, then listens for incoming connections and processes them
 pub fn run_soc(host_addr: &str, soc_addr: &str, port: &str) -> Result<(), Error> {
@@ -180,10 +197,8 @@ pub fn run_soc(host_addr: &str, soc_addr: &str, port: &str) -> Result<(), Error>
     setup_host(host_id, &mut kvs).unwrap();
 
     // need to now write full index
-    let test_str = "Hello from soc!".as_bytes();
-    let mut send_msg: [u8; 64] = [0u8; 64];
-    send_msg[0..test_str.len()].copy_from_slice(test_str);
-    let val_addr = send_msg.as_ptr() as u64;
+    // using the same memory size for soc and host
+    let val_addr = init_mem();
 
     put_addr_in_index_for_appropriate_keys(&kvs, val_addr, true);
 
@@ -199,7 +214,7 @@ pub fn run_soc(host_addr: &str, soc_addr: &str, port: &str) -> Result<(), Error>
     get_new_cm_id(soc_addr, port, &mut client_listen_id, &mut client_init, true)?;
     
     // register memory that clients will need
-    register_mem(client_listen_id, &mut kvs, val_addr, send_msg.len()).unwrap();
+    register_mem(client_listen_id, &mut kvs, val_addr, MEM_SIZE).unwrap();
     // loop to accept client connections
     run_soc_client_listen(client_listen_id, &mut client_init, kvs)
 }
