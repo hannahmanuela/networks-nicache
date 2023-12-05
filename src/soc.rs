@@ -201,7 +201,7 @@ pub fn run_soc(host_addr: &str, soc_addr: &str, port: &str) -> Result<(), Error>
     let val_addr = init_mem();
 
     println!("values base: 0x{:x}", val_addr);
-
+    
     put_addr_in_index_for_appropriate_keys(&kvs, val_addr, true);
 
     // ready to accept client conns

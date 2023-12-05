@@ -69,11 +69,13 @@ pub fn put_addr_in_index_for_appropriate_keys(kvs: &KVS, addr_to_put: u64, soc: 
     };
 
     for key_val in first_key..last_key {
-
+	
         let key_offset = key_val * 8;
 	let addr_offset = key_val * VAL_SIZE as u64;
         let ass_addr = (idx_base + key_offset) as *mut u64;
-        
+	
+	println!("inserting 0x{:x} into index", addr_to_put + key_offset);
+	
         let to_put = serialize_kv_addr(KVAddr{
             addr: addr_to_put + addr_offset,
             is_cached: soc,
