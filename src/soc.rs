@@ -1,5 +1,7 @@
 use rdma_sys::*;
+use std::os::fd::IntoRawFd;
 use std::ptr::null_mut;
+use std::fs::File;
 
 use crate::rdma_utils::*;
 use crate::kv_store::*;
@@ -158,13 +160,17 @@ fn setup_host(
 }
 
 fn init_mem() -> u64 {
+
+    let file = File::open("/dev/random").unwrap();
+    let fd = file.into_raw_fd();
+
     let res = unsafe {
 	libc::mmap(
 	    null_mut(),
 	    MEM_SIZE, 
 	    libc::PROT_READ | libc::PROT_WRITE,
 	    libc::MAP_ANONYMOUS | libc::MAP_PRIVATE | libc::MAP_POPULATE,
-	    0,
+	    fd,
 	    0,
 	)
     };

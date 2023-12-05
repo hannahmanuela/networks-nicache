@@ -2,6 +2,7 @@ use std::{ptr::null_mut, time::Duration};
 use std::time::Instant;
 use rand::{thread_rng, Rng};
 use rdma_sys::*;
+use std::io::{self, Write};
 use crate::{rdma_utils::*, deserialize_kv_addr};
 use crate::kv_store::*;
 
@@ -176,7 +177,7 @@ fn run_latency(
     //generate 10000 random indicies to read from
     let mut rng = thread_rng();
     let mut reqs: Vec<u64> = Vec::new();
-    let num_iters = 100000;
+    let num_iters = 3;
     for _ in 0..num_iters {
         reqs.push(rng.gen_range(0..N_KEYS as u64));
     }
@@ -188,7 +189,7 @@ fn run_latency(
     let mut avg_get_val_time_soc: Duration = Duration::from_secs(0);
     let mut avg_get_val_time_host: Duration = Duration::from_secs(0);
     // // do 10k requests and measure latency each time
-    for mut offset in 0..N_KEYS as u64 {
+    for mut offset in reqs {
         let now = Instant::now();
         // get address from index
         let (time_after_addr, time_after_val, on_host) = do_request(soc_conn, host_conn, addr_buf, val_buf, offset)?;
@@ -264,6 +265,9 @@ pub fn run_client(soc_addr: &str, soc_port: &str, host_addr: &str, host_port: &s
     // ---------------------------------------
     //      GET VALUE - RUN GETS
     // ---------------------------------------
+
+    io::stdout().flush();
+
 
     run_benchmark(&soc_conn, &host_conn, &mut addr_buf, &mut val_buf)?;
     
