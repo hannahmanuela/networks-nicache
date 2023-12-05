@@ -172,7 +172,7 @@ fn run_latency(
     //generate 10000 random indicies to read from
     let mut rng = thread_rng();
     let mut reqs: Vec<u64> = Vec::new();
-    let num_iters = 100;
+    let num_iters = 10000;
     for _ in 0..num_iters {
         reqs.push(rng.gen_range(0..256));
     }
