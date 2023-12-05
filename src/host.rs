@@ -39,7 +39,7 @@ fn setup_client_conn(
 }
 
 /// waits for the SoC to connect, then sends it the index base, and keys to read the index as well as the value(s)
-fn setup_soc(kvs: &mut KVS, val_addr: u64, send_msg: [u8; 64],  listen_id: *mut rdma_cm_id) -> Result<(), Error> {
+fn setup_soc(kvs: &mut KVS, val_addr: u64, listen_id: *mut rdma_cm_id) -> Result<(), Error> {
     
     println!("listening for soc");
     //wait for soc to connect
@@ -54,7 +54,7 @@ fn setup_soc(kvs: &mut KVS, val_addr: u64, send_msg: [u8; 64],  listen_id: *mut 
     let index_mem = reg_read(soc_id, kvs.host_index_base, INDEX_SIZE).unwrap();
     kvs.host_index_rkey = unsafe { (*index_mem).rkey };
     // register the value(s)
-    let values_mem = reg_read(soc_id, val_addr, send_msg.len()).unwrap();
+    let values_mem = reg_read(soc_id, val_addr, MEM_SIZE).unwrap();
     kvs.host_values_rkey = unsafe { (*values_mem).rkey };
 
     // put all of the values into buffers, register those
@@ -93,14 +93,29 @@ fn run_host_listen(listen_id: *mut rdma_cm_id,
     }
 }
 
+fn init_mem() -> u64 {
+    let res = unsafe {
+	libc::mmap(
+	    null_mut(),
+	    MEM_SIZE, 
+	    libc::PROT_READ | libc::PROT_WRITE,
+	    libc::MAP_ANONYMOUS | libc::MAP_PRIVATE,
+	    0,
+	    0,
+	)
+    };
+
+    if res == libc::MAP_FAILED {
+	panic!("mapping KVS memory failed");
+    }
+
+    return res as u64;
+}
+
 pub fn run_host(host_addr: &str, port: &str) -> Result<(), Error> {
     // create the KVS / index
     // - for this toy example, the host will populate all entries of the index with
-    let test_str = "Hello from host!".as_bytes();
-    let mut send_msg: [u8; 64] = [0u8; 64];
-    send_msg[0..test_str.len()].copy_from_slice(test_str);
-    let val_addr = send_msg.as_ptr() as u64;
-    
+    let val_addr = init_mem(); 
     println!("creating kv store");
     let mut kvs = init_kv_store(false);
     put_addr_in_index_for_appropriate_keys(&kvs, val_addr, false);
@@ -119,7 +134,7 @@ pub fn run_host(host_addr: &str, port: &str) -> Result<(), Error> {
     let mut listen_id: *mut rdma_cm_id = null_mut();
     get_new_cm_id(host_addr, port, &mut listen_id, &mut init, true).unwrap();
 
-    setup_soc(&mut kvs, val_addr, send_msg, listen_id)?;
+    setup_soc(&mut kvs, val_addr, listen_id)?;
 
     println!("listening for clients now");
     run_host_listen(listen_id, &mut init, kvs)

@@ -1,6 +1,7 @@
 use std::ptr::null_mut;
 
-
+pub const MEM_SIZE: usize = 0x4000; /* 16K = 256 * 64 */
+pub const VAL_SIZE: usize = 64;
 pub const N_KEYS: usize = 256;
 pub const KEY_SIZE: usize = 8;
 pub const INDEX_SIZE: usize = N_KEYS * KEY_SIZE;
