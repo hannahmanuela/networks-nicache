@@ -184,8 +184,8 @@ fn run_latency(
     let mut sum_get_val_time_host: Duration = Duration::from_secs(0);
     let mut num_host_iters = 0;
     let mut num_soc_iters = 0;
-    let mut avg_get_val_time_soc = 0;
-    let mut avg_get_val_time_host = 0;
+    let mut avg_get_val_time_soc: Duration = Duration::from_secs(0);
+    let mut avg_get_val_time_host: Duration = Duration::from_secs(0);
     // // do 10k requests and measure latency each time
     for offset in 0..N_KEYS as u64{
         let now = Instant::now();
