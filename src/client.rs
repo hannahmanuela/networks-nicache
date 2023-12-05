@@ -161,7 +161,7 @@ fn do_request(
     )?;
     // let time_after_get_val = Instant::now();
     // Ok((time_after_get_addr_to_read, time_after_get_val, on_host))
-    Ok((0, 0, on_host));
+    Ok((Instant::now(), Instant::now(), on_host))
 }
 
 fn run_latency(
