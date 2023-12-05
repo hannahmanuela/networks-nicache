@@ -143,7 +143,7 @@ fn do_request(
     )?;
     // deserialize the address
     let kv_addr = deserialize_kv_addr(u64::from_le_bytes(*addr_buf));
-    println!("kv_addr: 0x{:x}", kv_addr);
+    println!("kv_addr: 0x{:x}", kv_addr.addr);
     let mut on_host = false;
     let conn_to_use = if kv_addr.is_cached {
         &soc_conn
