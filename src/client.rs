@@ -148,6 +148,9 @@ fn do_request(
         soc_conn.index_base + (offset * 8),
         soc_conn.index_read_key,
     )?;
+
+    println!("read address: 0x{:x}", u64::from_le_bytes(*addr_buf));
+    
     // deserialize the address
     let kv_addr = deserialize_kv_addr(u64::from_le_bytes(*addr_buf));
     let mut on_host = false;
