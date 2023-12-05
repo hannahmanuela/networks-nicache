@@ -161,7 +161,7 @@ fn setup_host(
 
 fn init_mem() -> u64 {
 
-    let file = File::open("/dev/random").unwrap();
+    let file = File::open("rand.txt").unwrap();
     let fd = file.into_raw_fd();
 
     let res = unsafe {

@@ -164,6 +164,9 @@ fn do_request(
         conn_to_use.val_read_key,
     )?;
     let time_after_get_val = Instant::now();
+
+    println!("got value: {:?}", val_buf);
+
     Ok((time_after_get_addr_to_read, time_after_get_val, on_host))
     // Ok((Instant::now(), Instant::now(), on_host))
 }
@@ -189,7 +192,7 @@ fn run_latency(
     let mut avg_get_val_time_soc: Duration = Duration::from_secs(0);
     let mut avg_get_val_time_host: Duration = Duration::from_secs(0);
     // // do 10k requests and measure latency each time
-    for mut offset in reqs {
+    for offset in reqs {
         let now = Instant::now();
         // get address from index
         let (time_after_addr, time_after_val, on_host) = do_request(soc_conn, host_conn, addr_buf, val_buf, offset)?;
