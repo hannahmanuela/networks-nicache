@@ -185,7 +185,7 @@ fn run_latency(
     let mut num_host_iters = 0;
     let mut num_soc_iters = 0;
     // // do 10k requests and measure latency each time
-    for offset in reqs {
+    for offset in 0..N_KEYS as u64{
         let now = Instant::now();
         // get address from index
         let (time_after_addr, time_after_val, on_host) = do_request(soc_conn, host_conn, addr_buf, val_buf, offset)?;
