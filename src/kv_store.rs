@@ -63,7 +63,7 @@ pub fn put_addr_in_index_for_appropriate_keys(kvs: &KVS, addr_to_put: u64, soc: 
     };
 
     let last_key = if soc {
-        256 as u64
+        N_KEYS as u64
     } else {
         N_KEYS_ON_HOST as u64
     };
