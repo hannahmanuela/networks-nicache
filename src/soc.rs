@@ -179,6 +179,10 @@ fn init_mem() -> u64 {
 	panic!("mapping KVS memory failed");
     }
 
+    let mut to_print: [u8; 64] = [0u8; 64];
+    unsafe { libc::memcpy(to_print.as_mut_ptr() as u64 as *mut _, res, 64) };
+    println!("first 64 bytes: {:?}", to_print);
+
     return res as u64;
 }
 

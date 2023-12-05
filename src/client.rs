@@ -165,7 +165,7 @@ fn do_request(
     )?;
     let time_after_get_val = Instant::now();
 
-    println!("got value: {:?}", val_buf);
+    println!("getting from host? {} at address {:x}, got value: {:?}", on_host, kv_addr.addr , val_buf);
 
     Ok((time_after_get_addr_to_read, time_after_get_val, on_host))
     // Ok((Instant::now(), Instant::now(), on_host))
