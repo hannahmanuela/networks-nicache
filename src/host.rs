@@ -115,8 +115,8 @@ fn init_mem() -> u64 {
 pub fn run_host(host_addr: &str, port: &str) -> Result<(), Error> {
     // create the KVS / index
     // - for this toy example, the host will populate all entries of the index with
-    let val_addr = init_mem(); 
-    println!("creating kv store");
+    let val_addr = init_mem();
+    println!("creating kv store with base 0x{:x}", val_addr);
     let mut kvs = init_kv_store(false);
     put_addr_in_index_for_appropriate_keys(&kvs, val_addr, false);
 
