@@ -105,7 +105,7 @@ fn init_mem() -> u64 {
 	    null_mut(),
 	    MEM_SIZE, 
 	    libc::PROT_READ | libc::PROT_WRITE,
-	    libc::MAP_ANONYMOUS | libc::MAP_PRIVATE | libc::MAP_POPULATE, 
+	    libc::MAP_PRIVATE | libc::MAP_POPULATE, 
 	    fd,
 	    0,
 	)
