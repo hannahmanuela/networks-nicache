@@ -97,12 +97,10 @@ pub fn addr_given_key(key: u8, base_pointer: u64) -> u64 {
 /// initialize the key value store by memmaping a region of memory that can hold 256 addresses, returning the base pointer of the mapped region
 pub fn init_kv_store(soc: bool) -> KVS {
 
-    // TODO is this correct?
-    let key_size: usize = 256 * 8;
     let res = unsafe {
 	libc::mmap(
 	    null_mut(),
-	    key_size, 
+	    INDEX_SIZE, 
 	    libc::PROT_READ | libc::PROT_WRITE,
 	    libc::MAP_ANONYMOUS | libc::MAP_PRIVATE,
 	    0,
