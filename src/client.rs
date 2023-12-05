@@ -3,7 +3,7 @@ use std::time::Instant;
 use rand::{thread_rng, Rng};
 use rdma_sys::*;
 use crate::{rdma_utils::*, deserialize_kv_addr};
-
+use crate::kv_store::*;
 
 struct Connection {
     conn_id : *mut rdma_cm_id,
@@ -143,7 +143,6 @@ fn do_request(
     )?;
     // deserialize the address
     let kv_addr = deserialize_kv_addr(u64::from_le_bytes(*addr_buf));
-    println!("kv_addr: 0x{:x}", kv_addr.addr);
     let mut on_host = false;
     let conn_to_use = if kv_addr.is_cached {
         &soc_conn
@@ -175,7 +174,7 @@ fn run_latency(
     let mut reqs: Vec<u64> = Vec::new();
     let num_iters = 10000;
     for _ in 0..num_iters {
-        reqs.push(rng.gen_range(0..256));
+        reqs.push(rng.gen_range(0..N_KEYS as u64));
     }
     let mut sum_get_addr_time: Duration = Duration::from_secs(0);
     let mut sum_get_val_time_soc: Duration = Duration::from_secs(0);
@@ -217,7 +216,7 @@ fn run_throughput(
     let mut req_count = 0;
     // run for 30 seconds
     while now.elapsed().as_secs() < 30 {
-        let offset: u64 = rand::thread_rng().gen_range(0..256);
+        let offset: u64 = rand::thread_rng().gen_range(0..N_KEYS as u64);
         do_request(soc_conn, host_conn, addr_buf, val_buf, offset)?;
         req_count += 1;
     }
