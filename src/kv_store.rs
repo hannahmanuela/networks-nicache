@@ -6,7 +6,7 @@ pub const N_KEYS: usize = MEM_SIZE / VAL_SIZE;
 pub const KEY_SIZE: usize = 8;
 pub const INDEX_SIZE: usize = N_KEYS * KEY_SIZE;
 // this is assuming that the first N_KEYS_ON_HOST keys will be on the host
-pub const N_KEYS_ON_HOST: usize = N_KEYS / 2;
+pub const N_KEYS_ON_HOST: usize = N_KEYS;
 pub const N_KEYS_ON_SOC: usize = N_KEYS - N_KEYS_ON_HOST;
 
 #[derive(Clone, Copy)]
