@@ -159,6 +159,8 @@ fn do_request(
     };
     // let time_after_get_addr_to_read = Instant::now();
     // read value from appropriate source
+    println!("reading value: addr=0x{:x}",
+	     conn_to_use.val_read_key);
     post_read_and_wait(
         conn_to_use.conn_id,
         val_buf,
