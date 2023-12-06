@@ -1,8 +1,9 @@
+use std::io::Write;
 use std::{ptr::null_mut, time::Duration};
 use std::time::Instant;
 use rand::{thread_rng, Rng};
 use std::collections::HashMap;
-use plotters::prelude::*;
+use std::fs::File;
 
 use rdma_sys::*;
 use crate::{rdma_utils::*, deserialize_kv_addr};
@@ -278,61 +279,6 @@ fn run_latency_random(
     Ok((get_addr_times, get_val_times_host, get_val_times_soc))    
 }
 
-
-
-fn plot_latencies_diff_val_sizes(
-    soc_vals: HashMap<i32, i32>,
-    host_vals: HashMap<i32, i32>
-) -> Result<(), Error> {
-
-    let root_area = BitMapBackend::new(OUT_FILE_NAME, (1024, 768)).into_drawing_area();
-    root_area.fill(&WHITE).expect("plotting error");
-    let root_area = root_area.titled("Latencies across value sizes", ("sans-serif", 60)).expect("plotting error");
-
-    let mut cc = ChartBuilder::on(&root_area)
-        .margin(5)
-        .set_all_label_area_size(50)
-        .build_cartesian_2d(0..4000, 0..100000).expect("plotting error");
-
-    cc.configure_mesh()
-        .x_labels(20)
-        .y_labels(10)
-        .disable_mesh()
-        // .x_label_formatter(&|v| format!("{:.1}", v))
-        // .y_label_formatter(&|v| format!("{:.1}", v))
-        .draw().expect("plotting error");
-
-    cc.draw_series(LineSeries::new(soc_vals, &RED)).expect("plotting error")
-        .label("SoC")
-        .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], RED));
-
-    cc.draw_series(LineSeries::new(host_vals, &BLUE,)).expect("plotting error")
-    .label("Host")
-    .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], BLUE));
-
-    cc.configure_series_labels().border_style(BLACK).draw().expect("plotting error");
-
-    // cc.draw_series(PointSeries::of_element(
-    //     (-3.0f32..2.1f32).step(1.0).values().map(|x| (x, x.sin())),
-    //     5,
-    //     ShapeStyle::from(&RED).filled(),
-    //     &|coord, size, style| {
-    //         EmptyElement::at(coord)
-    //             + Circle::new((0, 0), size, style)
-    //             + Text::new(format!("{:?}", coord), (0, 15), ("sans-serif", 15))
-    //     },
-    // )).expect("plotting error");
-
-    // To avoid the IO failure being ignored silently, we manually call the present function
-    root_area.present().expect("Unable to write result to file, please make sure 'plotters-doc-data' dir exists under current dir");
-    println!("Result has been saved to {}", OUT_FILE_NAME);
-    Ok(())
-
-
-
-}
-
-
 fn fun_latency_diff_value_sizes(
     soc_conn: &mut Connection,
     host_conn: &mut Connection,
@@ -475,8 +421,11 @@ fn run_benchmark(
     let (_, get_val_host_times, get_val_soc_times) =
 	    fun_latency_diff_value_sizes(soc_conn, host_conn, addr_buf)?;
     println!("==============================");
-    plot_latencies_diff_val_sizes(get_val_soc_times, get_val_host_times);
-    println!("plotted restults");
+    println!("done!");
+    let mut file = File::open("out.txt").unwrap();
+    for (key, val) in get_val_host_times {
+        write!(file, "key: {}, host: {}, soc: {}", key, val, get_val_soc_times.get(&key).unwrap()).unwrap();
+    }
 
     Ok(())
 }
