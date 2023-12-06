@@ -24,6 +24,8 @@ struct Args {
     port: String, // just have soc and host use the same port for now
     #[arg(default_value = "100")]
     ratio: u64,
+    #[arg(long)]
+    one_value: bool,
 }
 
 // the order is: host runs, soc runs and connects to host, client runs and connects to soc and host
@@ -56,10 +58,10 @@ fn main() {
     
     if args.host {
 	    println!("Starting host KVS");
-        host::run_host(host_addr, port, args.ratio).unwrap();
+        host::run_host(host_addr, port, args.ratio, args.one_value).unwrap();
     } else if args.soc {
 	    println!("Starting SoC KVS");
-        soc::run_soc(host_addr, soc_addr, port, args.ratio).unwrap();
+        soc::run_soc(host_addr, soc_addr, port, args.ratio, args.one_value).unwrap();
     } else if args.client {
 	    println!("Starting client"); 
         client::run_client(soc_addr, port, host_addr, port).unwrap();

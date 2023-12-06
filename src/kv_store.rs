@@ -52,7 +52,7 @@ pub fn deserialize_kv_addr(addr_val: u64) -> KVAddr {
 }
 
 /// places a serialized kvaddr for all 8-bit keys, starting at base_pointer, that point to addr_to_put
-pub fn put_addr_in_index_for_appropriate_keys(kvs: &KVS, addr_to_put: u64, soc: bool, ratio: u64) {
+pub fn put_addr_in_index_for_appropriate_keys(kvs: &KVS, addr_to_put: u64, soc: bool, ratio: u64, one_value: bool) {
 
     let idx_base = if soc { kvs.soc_index_base } else { kvs.host_index_base };
 
@@ -79,7 +79,8 @@ pub fn put_addr_in_index_for_appropriate_keys(kvs: &KVS, addr_to_put: u64, soc: 
     for key_val in first_key..last_key {
 	
         let key_offset = key_val * 8;
-	    let addr_offset = key_val * VAL_SIZE as u64;
+	let addr_offset =
+	    if one_value { 0 } else { key_val * VAL_SIZE as u64 };
         let ass_addr = (idx_base + key_offset) as *mut u64;
 	
         let to_put = serialize_kv_addr(KVAddr{
