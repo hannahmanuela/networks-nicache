@@ -176,29 +176,30 @@ fn run_latency_page(
     let mut get_addr_times: Vec<Duration> = Default::default();
     let mut get_val_times_soc: Vec<Duration> = Default::default();
     let mut get_val_times_host: Vec<Duration> = Default::default();
-    
-    // // do 10k requests and measure latency each time
-    for mut offset in 0..N_KEYS as u64/64 {
 
-	// 64 keys correspond to a page because
-	// values are 64B and 64^2 = 4096
-	offset = offset * 64;
-	
-        let now = Instant::now();
-        // get address from index
-        let (time_after_addr, time_after_val, on_host) =
-	    do_request(soc_conn, host_conn, addr_buf, val_buf, offset)?;
-	
-        let time_to_addr = time_after_addr - now;
-        let time_to_val = time_after_val - time_after_addr;
+    for _ in 0..100 {
+	for mut offset in 0..N_KEYS as u64/64 {
 
-	get_addr_times.push(time_to_addr);
-	
-        if on_host {
-            get_val_times_host.push(time_to_val);
-        } else {
-	    get_val_times_soc.push(time_to_val);
-        }
+	    // 64 keys correspond to a page because
+	    // values are 64B and 64^2 = 4096
+	    offset = offset * 64;
+	    
+            let now = Instant::now();
+            // get address from index
+            let (time_after_addr, time_after_val, on_host) =
+		do_request(soc_conn, host_conn, addr_buf, val_buf, offset)?;
+	    
+            let time_to_addr = time_after_addr - now;
+            let time_to_val = time_after_val - time_after_addr;
+
+	    get_addr_times.push(time_to_addr);
+	    
+            if on_host {
+		get_val_times_host.push(time_to_val);
+            } else {
+		get_val_times_soc.push(time_to_val);
+            }
+	}
     }
     Ok((get_addr_times, get_val_times_host, get_val_times_soc))    
 }
