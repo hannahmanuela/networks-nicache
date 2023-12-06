@@ -56,8 +56,12 @@ pub fn put_addr_in_index_for_appropriate_keys(kvs: &KVS, addr_to_put: u64, soc: 
 
     let idx_base = if soc { kvs.soc_index_base } else { kvs.host_index_base };
 
-    let n_keys_on_soc = N_KEYS as u64 * (ratio/100);
+    let n_keys_on_soc =
+	(N_KEYS as f64 * (ratio as f64/100.0)).round() as u64;
     let n_keys_on_host = N_KEYS as u64 - n_keys_on_soc;
+
+    println!("{} keys on host", n_keys_on_host);
+    println!("{} keys on soc", n_keys_on_soc);
     
     let first_key = if soc {
         n_keys_on_host
