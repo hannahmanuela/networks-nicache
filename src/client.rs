@@ -178,7 +178,7 @@ fn run_latency_random(
 ) -> Result<(Vec<Duration>, Vec<Duration>, Vec<Duration>), Error> {
     let mut rng = thread_rng();
     let mut reqs: Vec<u64> = Vec::new();
-    let num_iters = 3;
+    let num_iters = 100000;
     for _ in 0..num_iters {
         reqs.push(rng.gen_range(0..N_KEYS as u64));
     }
@@ -281,6 +281,9 @@ fn run_latency_random(
 
 fn mean(vals: &Vec<Duration>) -> Duration {
     let sum: Duration = Iterator::sum(vals.iter());
+    if vals.is_empty() {
+	return Duration::from_secs(0);
+    }
     sum / vals.len() as u32
 }
 
