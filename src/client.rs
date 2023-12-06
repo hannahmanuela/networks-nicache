@@ -2,7 +2,6 @@ use std::{ptr::null_mut, time::Duration};
 use std::time::Instant;
 use rand::{thread_rng, Rng};
 use rdma_sys::*;
-use std::io::{self, Write};
 use crate::{rdma_utils::*, deserialize_kv_addr};
 use crate::kv_store::*;
 
@@ -171,76 +170,118 @@ fn do_request(
     // Ok((Instant::now(), Instant::now(), on_host))
 }
 
-fn run_latency(
+fn run_latency_random(
     soc_conn: &Connection,
     host_conn: &Connection,
     addr_buf: &mut [u8; 8],
     val_buf: &mut [u8; 64],
-) -> Result<(), Error> {
-    //generate 10000 random indicies to read from
+) -> Result<(Vec<Duration>, Vec<Duration>, Vec<Duration>), Error> {
     let mut rng = thread_rng();
     let mut reqs: Vec<u64> = Vec::new();
     let num_iters = 3;
     for _ in 0..num_iters {
         reqs.push(rng.gen_range(0..N_KEYS as u64));
     }
-    let mut sum_get_addr_time: Duration = Duration::from_secs(0);
-    let mut sum_get_val_time_soc: Duration = Duration::from_secs(0);
-    let mut sum_get_val_time_host: Duration = Duration::from_secs(0);
-    let mut num_host_iters = 0;
-    let mut num_soc_iters = 0;
-    let mut avg_get_val_time_soc: Duration = Duration::from_secs(0);
-    let mut avg_get_val_time_host: Duration = Duration::from_secs(0);
+    
+    let mut get_addr_times: Vec<Duration> = Default::default();
+    let mut get_val_times_soc: Vec<Duration> = Default::default();
+    let mut get_val_times_host: Vec<Duration> = Default::default();
+    
     // // do 10k requests and measure latency each time
     for offset in reqs {
         let now = Instant::now();
         // get address from index
-        let (time_after_addr, time_after_val, on_host) = do_request(soc_conn, host_conn, addr_buf, val_buf, offset)?;
+        let (time_after_addr, time_after_val, on_host) =
+	    do_request(soc_conn, host_conn, addr_buf, val_buf, offset)?;
+	
         let time_to_addr = time_after_addr - now;
-        sum_get_addr_time = sum_get_addr_time + time_to_addr;
         let time_to_val = time_after_val - time_after_addr;
+
+	get_addr_times.push(time_to_addr);
+	
         if on_host {
-            sum_get_val_time_host = sum_get_val_time_host + time_to_val;
-            num_host_iters += 1;
+            get_val_times_host.push(time_to_val);
         } else {
-            sum_get_val_time_soc = sum_get_val_time_soc + time_to_val;
-            num_soc_iters += 1;
+	    get_val_times_soc.push(time_to_val);
         }
     }
-    let avg_get_addr_time = sum_get_addr_time /  num_iters;
-    if num_soc_iters > 0 {
-	avg_get_val_time_soc = sum_get_val_time_soc / num_soc_iters;
-    }
-    if num_host_iters > 0 {
-	avg_get_val_time_host = sum_get_val_time_host / num_host_iters;
-    }
-    println!("avg_get_addr_time in nanos: {}", avg_get_addr_time.as_nanos());
-    println!("avg_get_val_time_soc in nanos: {}", avg_get_val_time_soc.as_nanos());
-    println!("avg_get_val_time_host in nanos: {}", avg_get_val_time_host.as_nanos());
-    Ok(())
+    Ok((get_addr_times, get_val_times_host, get_val_times_soc))    
 }
+// fn run_latency(
+//     soc_conn: &Connection,
+//     host_conn: &Connection,
+//     addr_buf: &mut [u8; 8],
+//     val_buf: &mut [u8; 64],
+// ) -> Result<(), Error> {
+//     //generate 10000 random indicies to read from
+//     let mut rng = thread_rng();
+//     let mut reqs: Vec<u64> = Vec::new();
+//     let num_iters = 3;
+//     for _ in 0..num_iters {
+//         reqs.push(rng.gen_range(0..N_KEYS as u64));
+//     }
+//     let mut sum_get_addr_time: Duration = Duration::from_secs(0);
+//     let mut sum_get_val_time_soc: Duration = Duration::from_secs(0);
+//     let mut sum_get_val_time_host: Duration = Duration::from_secs(0);
+//     let mut num_host_iters = 0;
+//     let mut num_soc_iters = 0;
+//     let mut avg_get_val_time_soc: Duration = Duration::from_secs(0);
+//     let mut avg_get_val_time_host: Duration = Duration::from_secs(0);
+//     // // do 10k requests and measure latency each time
+//     for offset in reqs {
+//         let now = Instant::now();
+//         // get address from index
+//         let (time_after_addr, time_after_val, on_host) = do_request(soc_conn, host_conn, addr_buf, val_buf, offset)?;
+//         let time_to_addr = time_after_addr - now;
+//         sum_get_addr_time = sum_get_addr_time + time_to_addr;
+//         let time_to_val = time_after_val - time_after_addr;
+//         if on_host {
+//             sum_get_val_time_host = sum_get_val_time_host + time_to_val;
+//             num_host_iters += 1;
+//         } else {
+//             sum_get_val_time_soc = sum_get_val_time_soc + time_to_val;
+//             num_soc_iters += 1;
+//         }
+//     }
+//     let avg_get_addr_time = sum_get_addr_time /  num_iters;
+//     if num_soc_iters > 0 {
+// 	avg_get_val_time_soc = sum_get_val_time_soc / num_soc_iters;
+//     }
+//     if num_host_iters > 0 {
+// 	avg_get_val_time_host = sum_get_val_time_host / num_host_iters;
+//     }
+//     println!("avg_get_addr_time in nanos: {}", avg_get_addr_time.as_nanos());
+//     println!("avg_get_val_time_soc in nanos: {}", avg_get_val_time_soc.as_nanos());
+//     println!("avg_get_val_time_host in nanos: {}", avg_get_val_time_host.as_nanos());
+//     Ok(())
+// }
 
-fn run_throughput(
-    soc_conn: &Connection,
-    host_conn: &Connection,
-    addr_buf: &mut [u8; 8],
-    val_buf: &mut [u8; 64],
-) -> Result<(), Error> {
-    let now = Instant::now();
-    let mut req_count = 0;
-    // run for 30 seconds
-    while now.elapsed().as_secs() < 30 {
-        let offset: u64 = rand::thread_rng().gen_range(0..N_KEYS as u64);
-        do_request(soc_conn, host_conn, addr_buf, val_buf, offset)?;
-        req_count += 1;
-    }
+// fn run_throughput(
+//     soc_conn: &Connection,
+//     host_conn: &Connection,
+//     addr_buf: &mut [u8; 8],
+//     val_buf: &mut [u8; 64],
+// ) -> Result<(), Error> {
+//     let now = Instant::now();
+//     let mut req_count = 0;
+//     // run for 30 seconds
+//     while now.elapsed().as_secs() < 30 {
+//         let offset: u64 = rand::thread_rng().gen_range(0..N_KEYS as u64);
+//         do_request(soc_conn, host_conn, addr_buf, val_buf, offset)?;
+//         req_count += 1;
+//     }
 
-    println!(
-        "{} requests in 30 seconds = {}reqs/s",
-        req_count,
-        req_count / 30
-    );
-    Ok(())
+//     println!(
+//         "{} requests in 30 seconds = {}reqs/s",
+//         req_count,
+//         req_count / 30
+//     );
+//     Ok(())
+// }
+
+fn mean(vals: &Vec<Duration>) -> Duration {
+    let sum: Duration = Iterator::sum(vals.iter());
+    sum / vals.len() as u32
 }
 
 fn run_benchmark(
@@ -249,9 +290,15 @@ fn run_benchmark(
     addr_buf: &mut [u8; 8],
     val_buf: &mut [u8; 64],
 ) -> Result<(), Error> {
-    run_latency(soc_conn, host_conn, addr_buf, val_buf)?;
-    // run_throughput(soc_conn, host_conn, addr_buf, val_buf)?;
+    let (get_addr_times, get_val_host_times, get_val_soc_times) =
+	run_latency_random(soc_conn, host_conn, addr_buf, val_buf)?;
 
+    println!("random access results:");
+    println!("get address mean: {}ns", mean(&get_addr_times).as_nanos());
+    println!("get value from host mean: {}ns", mean(&get_val_host_times).as_nanos());
+    println!("get value from soc mean: {}ns", mean(&get_val_soc_times).as_nanos());
+    
+    
     Ok(())
 }
 
@@ -268,9 +315,6 @@ pub fn run_client(soc_addr: &str, soc_port: &str, host_addr: &str, host_port: &s
     // ---------------------------------------
     //      GET VALUE - RUN GETS
     // ---------------------------------------
-
-    io::stdout().flush();
-
 
     run_benchmark(&soc_conn, &host_conn, &mut addr_buf, &mut val_buf)?;
     
