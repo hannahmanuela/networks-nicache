@@ -1,6 +1,9 @@
 use std::{ptr::null_mut, time::Duration};
 use std::time::Instant;
 use rand::{thread_rng, Rng};
+use std::collections::HashMap;
+use plotters::prelude::*;
+
 use rdma_sys::*;
 use crate::{rdma_utils::*, deserialize_kv_addr};
 use crate::kv_store::*;
@@ -13,6 +16,9 @@ struct Connection {
     val_read_key: u32,
     val_mr: *mut ibv_mr,
 }
+
+const NUM_ITERS: i32 = 10000;
+const OUT_FILE_NAME: &str = "lats.png";
 
 fn setup_host_conn(addr: &str, port: &str, val_buf: &mut [u8; 64]) -> Result<Connection, Error> {
     // initalize queues
@@ -131,7 +137,7 @@ fn do_request(
     soc_conn: &Connection,
     host_conn: &Connection,
     addr_buf: &mut [u8; 8],
-    val_buf: &mut [u8; 64],
+    val_buf: &mut [u8],
     offset: u64,
 ) -> Result<(Instant, Instant, bool), Error> {
     post_read_and_wait(
@@ -224,7 +230,7 @@ fn run_latency_sequential(
         let time_to_addr = time_after_addr - now;
         let time_to_val = time_after_val - time_after_addr;
 
-	get_addr_times.push(time_to_addr);
+	    get_addr_times.push(time_to_addr);
 	
         if on_host {
             get_val_times_host.push(time_to_val);
@@ -243,8 +249,7 @@ fn run_latency_random(
 ) -> Result<(Vec<Duration>, Vec<Duration>, Vec<Duration>), Error> {
     let mut rng = thread_rng();
     let mut reqs: Vec<u64> = Vec::new();
-    let num_iters = 100000;
-    for _ in 0..num_iters {
+    for _ in 0..NUM_ITERS {
         reqs.push(rng.gen_range(0..N_KEYS as u64));
     }
     
@@ -262,7 +267,7 @@ fn run_latency_random(
         let time_to_addr = time_after_addr - now;
         let time_to_val = time_after_val - time_after_addr;
 
-	get_addr_times.push(time_to_addr);
+	    get_addr_times.push(time_to_addr);
 	
         if on_host {
             get_val_times_host.push(time_to_val);
@@ -271,6 +276,134 @@ fn run_latency_random(
         }
     }
     Ok((get_addr_times, get_val_times_host, get_val_times_soc))    
+}
+
+
+
+fn plot_latencies_diff_val_sizes(
+    soc_vals: HashMap<usize, Duration>,
+    host_vals: HashMap<usize, Duration>
+) {
+
+    let root_area = BitMapBackend::new(OUT_FILE_NAME, (1024, 768)).into_drawing_area();
+    root_area.fill(&WHITE)?;
+    let root_area = root_area.titled("Latencies across value sizes", ("sans-serif", 60))?;
+
+    let mut cc = ChartBuilder::on(&root_area)
+        .margin(5)
+        .set_all_label_area_size(50)
+        .build_cartesian_2d(0..4000, 0..100000)?;
+
+    cc.configure_mesh()
+        .x_labels(20)
+        .y_labels(10)
+        .disable_mesh()
+        // .x_label_formatter(&|v| format!("{:.1}", v))
+        // .y_label_formatter(&|v| format!("{:.1}", v))
+        .draw()?;
+
+    cc.draw_series(LineSeries::new(soc_vals, &RED))?
+        .label("SoC")
+        .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], RED));
+
+    cc.draw_series(LineSeries::new(host_vals, &BLUE,))?
+    .label("Host")
+    .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], BLUE));
+
+    cc.configure_series_labels().border_style(BLACK).draw()?;
+
+    cc.draw_series(PointSeries::of_element(
+        (-3.0f32..2.1f32).step(1.0).values().map(|x| (x, x.sin())),
+        5,
+        ShapeStyle::from(&RED).filled(),
+        &|coord, size, style| {
+            EmptyElement::at(coord)
+                + Circle::new((0, 0), size, style)
+                + Text::new(format!("{:?}", coord), (0, 15), ("sans-serif", 15))
+        },
+    ))?;
+
+    // To avoid the IO failure being ignored silently, we manually call the present function
+    root_area.present().expect("Unable to write result to file, please make sure 'plotters-doc-data' dir exists under current dir");
+    println!("Result has been saved to {}", OUT_FILE_NAME);
+    Ok(())
+
+
+
+}
+
+
+fn fun_latency_diff_value_sizes(
+    soc_conn: &mut Connection,
+    host_conn: &mut Connection,
+    addr_buf: &mut [u8; 8],
+) -> Result<(HashMap<usize, Duration>, HashMap<usize, Duration>, HashMap<usize, Duration>), Error> {
+
+    // register big mem for value
+
+    let mut all_addr_times: HashMap<usize, Duration> = HashMap::new();
+    let mut all_val_times_soc: HashMap<usize, Duration> = HashMap::new();
+    let mut all_val_times_host: HashMap<usize, Duration> = HashMap::new();
+
+    for val_size in (8..4000).step_by(8) {
+
+        let mut val_vec = vec![1u8; val_size];
+        let val_buf = val_vec.as_mut_slice();
+
+        // register new val buf with both conns
+        let val_mr = reg_read(soc_conn.conn_id, val_buf.as_ptr() as u64, val_buf.len()).unwrap();
+        soc_conn.val_mr = val_mr;
+        let val_mr = reg_read(host_conn.conn_id, val_buf.as_ptr() as u64, val_buf.len()).unwrap(); 
+        host_conn.val_mr = val_mr;
+
+        // run the iterations
+        let (addr_times, soc_times, host_times) = run_latency_given_val_size(soc_conn, host_conn, addr_buf, val_buf).unwrap();
+
+        all_addr_times.insert(val_size, mean(&addr_times));
+        all_val_times_soc.insert(val_size, mean(&soc_times));
+        all_val_times_host.insert(val_size, mean(&host_times));
+
+    }
+
+    Ok((all_addr_times, all_val_times_soc, all_val_times_host))
+}
+
+
+fn run_latency_given_val_size(
+    soc_conn: &Connection,
+    host_conn: &Connection,
+    addr_buf: &mut [u8; 8],
+    val_buf: &mut [u8]
+)  -> Result<(Vec<Duration>, Vec<Duration>, Vec<Duration>), Error> {
+    let mut rng = thread_rng();
+    let mut reqs: Vec<u64> = Vec::new();
+    for _ in 0..NUM_ITERS {
+        reqs.push(rng.gen_range(0..N_KEYS as u64));
+    }
+    
+    let mut get_addr_times: Vec<Duration> = Default::default();
+    let mut get_val_times_soc: Vec<Duration> = Default::default();
+    let mut get_val_times_host: Vec<Duration> = Default::default();
+    
+    // // do 10k requests and measure latency each time
+    for offset in reqs {
+        let now = Instant::now();
+        // get address from index
+        let (time_after_addr, time_after_val, on_host) =
+        do_request(soc_conn, host_conn, addr_buf, val_buf, offset)?;
+    
+        let time_to_addr = time_after_addr - now;
+        let time_to_val = time_after_val - time_after_addr;
+
+        get_addr_times.push(time_to_addr);
+    
+        if on_host {
+            get_val_times_host.push(time_to_val);
+        } else {
+        get_val_times_soc.push(time_to_val);
+        }
+    }
+    Ok((get_addr_times, get_val_times_host, get_val_times_soc))
 }
 
 // fn run_throughput(
@@ -305,39 +438,46 @@ fn mean(vals: &Vec<Duration>) -> Duration {
 }
 
 fn run_benchmark(
-    soc_conn: &Connection,
-    host_conn: &Connection,
+    soc_conn: &mut Connection,
+    host_conn: &mut Connection,
     addr_buf: &mut [u8; 8],
     val_buf: &mut [u8; 64],
 ) -> Result<(), Error> {
+
     // run random
     let (get_addr_times, get_val_host_times, get_val_soc_times) =
-	run_latency_random(soc_conn, host_conn, addr_buf, val_buf)?;
-
+	    run_latency_random(soc_conn, host_conn, addr_buf, val_buf)?;
     println!("==============================");
     println!("random access results:");
     println!("get address mean: {}ns", mean(&get_addr_times).as_nanos());
     println!("get value from host mean: {}ns", mean(&get_val_host_times).as_nanos());
     println!("get value from soc mean: {}ns", mean(&get_val_soc_times).as_nanos());
+
     // run sequential
     let (get_addr_times, get_val_host_times, get_val_soc_times) =
-	run_latency_sequential(soc_conn, host_conn, addr_buf, val_buf)?;
-
+	    run_latency_sequential(soc_conn, host_conn, addr_buf, val_buf)?;
     println!("==============================");
     println!("sequential access results:");
     println!("get address mean: {}ns", mean(&get_addr_times).as_nanos());
     println!("get value from host mean: {}ns", mean(&get_val_host_times).as_nanos());
     println!("get value from soc mean: {}ns", mean(&get_val_soc_times).as_nanos());
+
     // run page granularity
     let (get_addr_times, get_val_host_times, get_val_soc_times) =
-	run_latency_page(soc_conn, host_conn, addr_buf, val_buf)?;
-
+	    run_latency_page(soc_conn, host_conn, addr_buf, val_buf)?;
     println!("==============================");
     println!("page access results:");
     println!("get address mean: {}ns", mean(&get_addr_times).as_nanos());
     println!("get value from host mean: {}ns", mean(&get_val_host_times).as_nanos());
     println!("get value from soc mean: {}ns", mean(&get_val_soc_times).as_nanos());
     println!("total reads: {}", get_val_host_times.len() + get_val_soc_times.len());
+
+    let (_, get_val_host_times, get_val_soc_times) =
+	    fun_latency_diff_value_sizes(soc_conn, host_conn, addr_buf)?;
+    println!("==============================");
+    plot_latencies_diff_val_sizes(get_val_soc_times, get_val_host_times);
+    println!("plotted restults");
+
     Ok(())
 }
 
@@ -347,15 +487,15 @@ pub fn run_client(soc_addr: &str, soc_port: &str, host_addr: &str, host_port: &s
     let mut addr_buf = [0u8; 8];
 
     println!("setting up soc conn");
-    let soc_conn = setup_soc_conn(soc_addr, soc_port, &mut addr_buf, &mut val_buf).unwrap();
+    let mut soc_conn = setup_soc_conn(soc_addr, soc_port, &mut addr_buf, &mut val_buf).unwrap();
     println!("setting up host conn");
-    let host_conn = setup_host_conn(host_addr, host_port, &mut val_buf).unwrap();
+    let mut host_conn = setup_host_conn(host_addr, host_port, &mut val_buf).unwrap();
     
     // ---------------------------------------
     //      GET VALUE - RUN GETS
     // ---------------------------------------
 
-    run_benchmark(&soc_conn, &host_conn, &mut addr_buf, &mut val_buf)?;
+    run_benchmark(&mut soc_conn, &mut host_conn, &mut addr_buf, &mut val_buf)?;
     
     Ok(())
 }

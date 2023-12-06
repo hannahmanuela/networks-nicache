@@ -125,16 +125,16 @@ pub fn run_host(host_addr: &str, port: &str, ratio: u64, one_value: bool) -> Res
     let val_addr = init_mem();
 
     if one_value {
-	let msg = b"Hello from host!!";
-	let mut padding = [0u8; 64];
-	padding[0..msg.len()].copy_from_slice(msg);
-	let buf =
-	    unsafe {
-		std::slice::from_raw_parts_mut(val_addr as *mut u8, 64)
-	    };
-	
-	buf.copy_from_slice(&padding);
-	println!("{}", std::str::from_utf8(buf).unwrap());
+        let msg = b"Hello from host!!";
+        let mut padding = [0u8; 64];
+        padding[0..msg.len()].copy_from_slice(msg);
+        let buf =
+            unsafe {
+            std::slice::from_raw_parts_mut(val_addr as *mut u8, 64)
+            };
+        
+        buf.copy_from_slice(&padding);
+        println!("{}", std::str::from_utf8(buf).unwrap());
     }
     
     println!("creating kv store with base 0x{:x}", val_addr);
