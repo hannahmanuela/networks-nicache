@@ -123,6 +123,17 @@ pub fn run_host(host_addr: &str, port: &str, ratio: u64, one_value: bool) -> Res
     // - for this toy example, the host will populate all entries of the index with
 
     let val_addr = init_mem();
+
+    if one_value {
+	let msg = b"Hello from host!!";
+	let buf =
+	    unsafe {
+		std::slice::from_raw_parts_mut(val_addr as *mut u8, msg.len())
+	    };
+	
+	buf.copy_from_slice(msg);
+    }
+    
     println!("creating kv store with base 0x{:x}", val_addr);
     let mut kvs = init_kv_store(false);
     put_addr_in_index_for_appropriate_keys(&kvs, val_addr, false, ratio, one_value);
