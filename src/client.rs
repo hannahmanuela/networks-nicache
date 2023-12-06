@@ -177,7 +177,7 @@ fn run_latency_page(
     let mut get_val_times_soc: Vec<Duration> = Default::default();
     let mut get_val_times_host: Vec<Duration> = Default::default();
 
-    for _ in 0..100 {
+    for _ in 0..64 {
 	for mut offset in 0..N_KEYS as u64/64 {
 
 	    // 64 keys correspond to a page because
