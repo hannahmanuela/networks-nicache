@@ -3,8 +3,7 @@ use std::{ptr::null_mut, time::Duration};
 use std::time::Instant;
 use rand::{thread_rng, Rng};
 use std::collections::HashMap;
-use std::fs::File;
-
+use std::fs::OpenOptions;
 use rdma_sys::*;
 use crate::{rdma_utils::*, deserialize_kv_addr};
 use crate::kv_store::*;
@@ -18,7 +17,7 @@ struct Connection {
     val_mr: *mut ibv_mr,
 }
 
-const NUM_ITERS: i32 = 10000;
+const NUM_ITERS: i32 = 100000;
 const OUT_FILE_NAME: &str = "lats.png";
 
 fn setup_host_conn(addr: &str, port: &str, val_buf: &mut [u8; 64]) -> Result<Connection, Error> {
@@ -291,7 +290,7 @@ fn fun_latency_diff_value_sizes(
     let mut all_val_times_soc: HashMap<i32, i32> = HashMap::new();
     let mut all_val_times_host: HashMap<i32, i32> = HashMap::new();
 
-    for val_size in (8..4000).step_by(8) {
+    for val_size in (8..4096).step_by(8) {
 
         let mut val_vec = vec![1u8; val_size];
         let val_buf = val_vec.as_mut_slice();
@@ -309,6 +308,14 @@ fn fun_latency_diff_value_sizes(
         all_val_times_soc.insert(val_size as i32, mean(&soc_times).as_nanos() as i32);
         all_val_times_host.insert(val_size as i32, mean(&host_times).as_nanos() as i32);
 
+        let mut data_file = OpenOptions::new()
+            .append(true)
+            .open("./out.txt")
+            .expect("cannot open file");
+        data_file
+            .write(format!("key: {}, host: {}, soc: {}\n", val_size, mean(&host_times).as_nanos(), mean(&soc_times).as_nanos()).as_bytes())
+            .expect("write failed");
+    
     }
 
     Ok((all_addr_times, all_val_times_soc, all_val_times_host))
@@ -422,10 +429,6 @@ fn run_benchmark(
 	    fun_latency_diff_value_sizes(soc_conn, host_conn, addr_buf)?;
     println!("==============================");
     println!("done!");
-    let mut file = File::open("out.txt").unwrap();
-    for (key, val) in get_val_host_times {
-        write!(file, "key: {}, host: {}, soc: {}", key, val, get_val_soc_times.get(&key).unwrap()).unwrap();
-    }
 
     Ok(())
 }
