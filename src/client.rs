@@ -281,18 +281,18 @@ fn run_latency_random(
 
 
 fn plot_latencies_diff_val_sizes(
-    soc_vals: HashMap<usize, Duration>,
-    host_vals: HashMap<usize, Duration>
-) {
+    soc_vals: HashMap<i32, i32>,
+    host_vals: HashMap<i32, i32>
+) -> Result<(), Error> {
 
     let root_area = BitMapBackend::new(OUT_FILE_NAME, (1024, 768)).into_drawing_area();
-    root_area.fill(&WHITE)?;
-    let root_area = root_area.titled("Latencies across value sizes", ("sans-serif", 60))?;
+    root_area.fill(&WHITE).expect("plotting error");
+    let root_area = root_area.titled("Latencies across value sizes", ("sans-serif", 60)).expect("plotting error");
 
     let mut cc = ChartBuilder::on(&root_area)
         .margin(5)
         .set_all_label_area_size(50)
-        .build_cartesian_2d(0..4000, 0..100000)?;
+        .build_cartesian_2d(0..4000, 0..100000).expect("plotting error");
 
     cc.configure_mesh()
         .x_labels(20)
@@ -300,28 +300,28 @@ fn plot_latencies_diff_val_sizes(
         .disable_mesh()
         // .x_label_formatter(&|v| format!("{:.1}", v))
         // .y_label_formatter(&|v| format!("{:.1}", v))
-        .draw()?;
+        .draw().expect("plotting error");
 
-    cc.draw_series(LineSeries::new(soc_vals, &RED))?
+    cc.draw_series(LineSeries::new(soc_vals, &RED)).expect("plotting error")
         .label("SoC")
         .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], RED));
 
-    cc.draw_series(LineSeries::new(host_vals, &BLUE,))?
+    cc.draw_series(LineSeries::new(host_vals, &BLUE,)).expect("plotting error")
     .label("Host")
     .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], BLUE));
 
-    cc.configure_series_labels().border_style(BLACK).draw()?;
+    cc.configure_series_labels().border_style(BLACK).draw().expect("plotting error");
 
-    cc.draw_series(PointSeries::of_element(
-        (-3.0f32..2.1f32).step(1.0).values().map(|x| (x, x.sin())),
-        5,
-        ShapeStyle::from(&RED).filled(),
-        &|coord, size, style| {
-            EmptyElement::at(coord)
-                + Circle::new((0, 0), size, style)
-                + Text::new(format!("{:?}", coord), (0, 15), ("sans-serif", 15))
-        },
-    ))?;
+    // cc.draw_series(PointSeries::of_element(
+    //     (-3.0f32..2.1f32).step(1.0).values().map(|x| (x, x.sin())),
+    //     5,
+    //     ShapeStyle::from(&RED).filled(),
+    //     &|coord, size, style| {
+    //         EmptyElement::at(coord)
+    //             + Circle::new((0, 0), size, style)
+    //             + Text::new(format!("{:?}", coord), (0, 15), ("sans-serif", 15))
+    //     },
+    // )).expect("plotting error");
 
     // To avoid the IO failure being ignored silently, we manually call the present function
     root_area.present().expect("Unable to write result to file, please make sure 'plotters-doc-data' dir exists under current dir");
@@ -337,13 +337,13 @@ fn fun_latency_diff_value_sizes(
     soc_conn: &mut Connection,
     host_conn: &mut Connection,
     addr_buf: &mut [u8; 8],
-) -> Result<(HashMap<usize, Duration>, HashMap<usize, Duration>, HashMap<usize, Duration>), Error> {
+) -> Result<(HashMap<i32, i32>, HashMap<i32, i32>, HashMap<i32, i32>), Error> {
 
     // register big mem for value
 
-    let mut all_addr_times: HashMap<usize, Duration> = HashMap::new();
-    let mut all_val_times_soc: HashMap<usize, Duration> = HashMap::new();
-    let mut all_val_times_host: HashMap<usize, Duration> = HashMap::new();
+    let mut all_addr_times: HashMap<i32, i32> = HashMap::new();
+    let mut all_val_times_soc: HashMap<i32, i32> = HashMap::new();
+    let mut all_val_times_host: HashMap<i32, i32> = HashMap::new();
 
     for val_size in (8..4000).step_by(8) {
 
@@ -359,9 +359,9 @@ fn fun_latency_diff_value_sizes(
         // run the iterations
         let (addr_times, soc_times, host_times) = run_latency_given_val_size(soc_conn, host_conn, addr_buf, val_buf).unwrap();
 
-        all_addr_times.insert(val_size, mean(&addr_times));
-        all_val_times_soc.insert(val_size, mean(&soc_times));
-        all_val_times_host.insert(val_size, mean(&host_times));
+        all_addr_times.insert(val_size as i32, mean(&addr_times).as_nanos() as i32);
+        all_val_times_soc.insert(val_size as i32, mean(&soc_times).as_nanos() as i32);
+        all_val_times_host.insert(val_size as i32, mean(&host_times).as_nanos() as i32);
 
     }
 

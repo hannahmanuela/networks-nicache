@@ -18,6 +18,7 @@ pub enum Error {
     GetAddrInfo,
     CreateEp,
     QueryQP,
+    Plot,
 }
 
 pub fn reg_read(id: *mut rdma_cm_id, base: u64, len: usize) -> Result<*mut ibv_mr, Error> {
