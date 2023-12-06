@@ -126,12 +126,14 @@ pub fn run_host(host_addr: &str, port: &str, ratio: u64, one_value: bool) -> Res
 
     if one_value {
 	let msg = b"Hello from host!!";
+	let mut padding = [0u8; 64];
+	padding[0..msg.len()].copy_from_slice(msg);
 	let buf =
 	    unsafe {
-		std::slice::from_raw_parts_mut(val_addr as *mut u8, msg.len())
+		std::slice::from_raw_parts_mut(val_addr as *mut u8, 64)
 	    };
 	
-	buf.copy_from_slice(msg);
+	buf.copy_from_slice(&padding);
 	println!("{}", std::str::from_utf8(buf).unwrap());
     }
     
