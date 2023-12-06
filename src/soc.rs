@@ -187,7 +187,7 @@ fn init_mem() -> u64 {
 }
 
 /// sets up the soc rdma connection, then listens for incoming connections and processes them
-pub fn run_soc(host_addr: &str, soc_addr: &str, port: &str) -> Result<(), Error> {
+pub fn run_soc(host_addr: &str, soc_addr: &str, port: &str, ratio: u64) -> Result<(), Error> {
 
     // inits a soc-local view of the kv store
     let mut kvs = init_kv_store(true);
@@ -212,7 +212,7 @@ pub fn run_soc(host_addr: &str, soc_addr: &str, port: &str) -> Result<(), Error>
 
     println!("values base: 0x{:x}", val_addr);
     
-    put_addr_in_index_for_appropriate_keys(&kvs, val_addr, true);
+    put_addr_in_index_for_appropriate_keys(&kvs, val_addr, true, ratio);
 
     // ready to accept client conns
     let mut client_init = unsafe { std::mem::zeroed::<ibv_qp_init_attr>() };
