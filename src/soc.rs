@@ -138,21 +138,27 @@ fn setup_host(
     kvs.host_index_rkey = u32::from_le_bytes(host_index_rkey_buf);
     kvs.host_values_rkey = u32::from_le_bytes(host_values_rkey_buf);
 
-
-    // register mem for soc's index which we will now write hosts values into
-    let mut curr_val_addr_buf: [u8; 8] = [0u8; 8];
-    let curr_value_mr = reg_read(host_conn_id, curr_val_addr_buf.as_ptr() as u64, curr_val_addr_buf.len()).unwrap();
-
     println!("index base addr: 0x{:x}", kvs.soc_index_base);
     // read index from host
-    for key_val in 0..N_KEYS_ON_HOST as u64 {
-        // read addresses (already serialized) into buffer
-        post_read_and_wait(host_conn_id, &mut curr_val_addr_buf, curr_value_mr, kvs.host_index_base + ((8 * key_val) as u64), kvs.host_index_rkey).unwrap();
-        // write address to soc's index
-        let offset = key_val * 8;
-        let ass_addr = (kvs.soc_index_base + offset) as *mut u64;
-        unsafe { *ass_addr =  u64::from_le_bytes(curr_val_addr_buf) };
-    }
+
+    let index_mem =
+	reg_read(host_conn_id, kvs.soc_index_base, INDEX_SIZE).unwrap();
+    
+    let mut index_buf =
+	unsafe {
+	    std::slice::from_raw_parts_mut(
+		kvs.soc_index_base as *mut u8,
+		INDEX_SIZE
+	    )
+	};
+
+    post_read_and_wait(
+	host_conn_id,
+	&mut index_buf,
+	index_mem,
+	kvs.host_index_base as u64,
+	kvs.host_index_rkey,
+    ).unwrap();
 
     println!("wrote to index");
 
