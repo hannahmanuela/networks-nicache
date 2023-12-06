@@ -335,7 +335,8 @@ fn run_benchmark(
     println!("page access results:");
     println!("get address mean: {}ns", mean(&get_addr_times).as_nanos());
     println!("get value from host mean: {}ns", mean(&get_val_host_times).as_nanos());
-    println!("get value from soc mean: {}ns", mean(&get_val_soc_times).as_nanos());    
+    println!("get value from soc mean: {}ns", mean(&get_val_soc_times).as_nanos());
+    println!("total reads: {}", get_val_host_times.len() + get_val_soc_times.len());
     Ok(())
 }
 
