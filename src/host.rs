@@ -132,6 +132,7 @@ pub fn run_host(host_addr: &str, port: &str, ratio: u64, one_value: bool) -> Res
 	    };
 	
 	buf.copy_from_slice(msg);
+	println!("{}", std::str::from_utf8(buf).unwrap());
     }
     
     println!("creating kv store with base 0x{:x}", val_addr);

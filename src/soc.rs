@@ -224,6 +224,7 @@ pub fn run_soc(host_addr: &str, soc_addr: &str, port: &str, ratio: u64, one_valu
 	    };
 	
 	buf.copy_from_slice(msg);
+	println!("{}", std::str::from_utf8(buf).unwrap());
     }
 
     println!("values base: 0x{:x}", val_addr);
