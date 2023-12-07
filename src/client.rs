@@ -302,7 +302,7 @@ fn fun_latency_diff_value_sizes(
         host_conn.val_mr = val_mr;
 
         // run the iterations
-        let (addr_times, soc_times, host_times) = run_latency_given_val_size(soc_conn, host_conn, addr_buf, val_buf).unwrap();
+        let (addr_times, host_times, soc_times) = run_latency_given_val_size(soc_conn, host_conn, addr_buf, val_buf).unwrap();
 
         all_addr_times.insert(val_size as i32, mean(&addr_times).as_nanos() as i32);
         all_val_times_soc.insert(val_size as i32, mean(&soc_times).as_nanos() as i32);
