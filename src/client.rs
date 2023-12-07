@@ -18,7 +18,6 @@ struct Connection {
 }
 
 const NUM_ITERS: i32 = 100000;
-const OUT_FILE_NAME: &str = "lats.png";
 
 fn setup_host_conn(addr: &str, port: &str, val_buf: &mut [u8; 64]) -> Result<Connection, Error> {
     // initalize queues
@@ -282,7 +281,7 @@ fn fun_latency_diff_value_sizes(
     soc_conn: &mut Connection,
     host_conn: &mut Connection,
     addr_buf: &mut [u8; 8],
-) -> Result<(HashMap<i32, i32>, HashMap<i32, i32>, HashMap<i32, i32>), Error> {
+) -> Result<(), Error> {
 
     // register big mem for value
 
@@ -290,9 +289,7 @@ fn fun_latency_diff_value_sizes(
     let mut all_val_times_soc: HashMap<i32, i32> = HashMap::new();
     let mut all_val_times_host: HashMap<i32, i32> = HashMap::new();
 
-    let mut val_size = 8;
-
-    while val_size < 4096 {
+    for val_size in (8..1456).step_by(8) {
 
         let mut val_vec = vec![1u8; val_size];
         let val_buf = val_vec.as_mut_slice();
@@ -317,12 +314,10 @@ fn fun_latency_diff_value_sizes(
         data_file
             .write(format!("key: {}, host: {}, soc: {}\n", val_size, mean(&host_times).as_nanos(), mean(&soc_times).as_nanos()).as_bytes())
             .expect("write failed");
-        
-        val_size = val_size * 2;
-    
+            
     }
 
-    Ok((all_addr_times, all_val_times_soc, all_val_times_host))
+    Ok(())
 }
 
 
@@ -429,8 +424,7 @@ fn run_benchmark(
     println!("get value from soc mean: {}ns", mean(&get_val_soc_times).as_nanos());
     println!("total reads: {}", get_val_host_times.len() + get_val_soc_times.len());
 
-    let (_, get_val_host_times, get_val_soc_times) =
-	    fun_latency_diff_value_sizes(soc_conn, host_conn, addr_buf)?;
+    fun_latency_diff_value_sizes(soc_conn, host_conn, addr_buf)?;
     println!("==============================");
     println!("done!");
 
