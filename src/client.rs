@@ -290,7 +290,9 @@ fn fun_latency_diff_value_sizes(
     let mut all_val_times_soc: HashMap<i32, i32> = HashMap::new();
     let mut all_val_times_host: HashMap<i32, i32> = HashMap::new();
 
-    for val_size in (8..4096).step_by(8) {
+    let mut val_size = 8;
+
+    while val_size < 4096 {
 
         let mut val_vec = vec![1u8; val_size];
         let val_buf = val_vec.as_mut_slice();
@@ -315,6 +317,8 @@ fn fun_latency_diff_value_sizes(
         data_file
             .write(format!("key: {}, host: {}, soc: {}\n", val_size, mean(&host_times).as_nanos(), mean(&soc_times).as_nanos()).as_bytes())
             .expect("write failed");
+        
+        val_size = val_size * 2;
     
     }
 
